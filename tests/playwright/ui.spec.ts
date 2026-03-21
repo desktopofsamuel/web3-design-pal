@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 const STORAGE_KEY = 'web3dpal_truncate_rules';
+const BUY_ME_COFFEE_URL = 'https://example.com/buy-me-coffee';
+const PROFILE_URL = 'https://desktopofsamuel.com';
 const ethLine = /^0x[a-f0-9]{40}$/;
 /** Base58 alphabet (no 0 O I l) */
 const solPattern = /^[1-9A-HJ-NP-Za-km-z]{44}$/;
@@ -25,7 +27,7 @@ function postSelectionContext(
  * optionally mirror to localStorage so tests can reset state.
  */
 async function installFigmaStorageMock(page: import('@playwright/test').Page): Promise<void> {
-  await page.addInitScript((key: string) => {
+  await page.addInitScript((cfg: { key: string; buy: string; profile: string }) => {
     window.addEventListener('message', (ev: MessageEvent) => {
       const pm = (ev.data as { pluginMessage?: Record<string, unknown> } | undefined)
         ?.pluginMessage;
@@ -35,7 +37,7 @@ async function installFigmaStorageMock(page: import('@playwright/test').Page): P
         let start = 6;
         let end = 4;
         try {
-          const raw = localStorage.getItem(key);
+          const raw = localStorage.getItem(cfg.key);
           if (raw) {
             const p = JSON.parse(raw) as { start?: unknown; end?: unknown };
             start = Math.max(0, Math.min(64, Math.floor(Number(p.start) || 6)));
@@ -46,18 +48,30 @@ async function installFigmaStorageMock(page: import('@playwright/test').Page): P
         }
         window.postMessage({ pluginMessage: { type: 'truncate-rules', start, end } }, '*');
       }
+      if (type === 'get-footer-links') {
+        window.postMessage(
+          {
+            pluginMessage: {
+              type: 'footer-links',
+              buyMeCoffeeUrl: cfg.buy,
+              profileUrl: cfg.profile,
+            },
+          },
+          '*',
+        );
+      }
       if (type === 'save-truncate-rules') {
         const start = Math.max(0, Math.min(64, Math.floor(Number(pm.start) || 6)));
         const end = Math.max(0, Math.min(64, Math.floor(Number(pm.end) || 4)));
         try {
-          localStorage.setItem(key, JSON.stringify({ start, end }));
+          localStorage.setItem(cfg.key, JSON.stringify({ start, end }));
         } catch {
           /* ignore */
         }
         window.postMessage({ pluginMessage: { type: 'truncate-rules', start, end } }, '*');
       }
     });
-  }, STORAGE_KEY);
+  }, { key: STORAGE_KEY, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL });
 }
 
 test.describe('Web3 Design Pal UI', () => {
@@ -78,6 +92,20 @@ test.describe('Web3 Design Pal UI', () => {
   test('default primary action is Create (no selection-context yet)', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Create' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Apply' })).toHaveCount(0);
+  });
+
+  test('network chips are ordered Ethereum, Bitcoin, Solana, Ripple', async ({ page }) => {
+    await expect(page.locator('#chips .chip')).toHaveText([
+      'Ethereum',
+      'Bitcoin',
+      'Solana',
+      'Ripple',
+    ]);
+  });
+
+  test('footer links are valid and point to expected URLs', async ({ page }) => {
+    await expect(page.locator('#link-buy-me-coffee')).toHaveAttribute('href', BUY_ME_COFFEE_URL);
+    await expect(page.locator('#link-profile')).toHaveAttribute('href', PROFILE_URL);
   });
 
   test('TxID tab shows coming soon empty state', async ({ page }) => {

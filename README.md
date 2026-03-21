@@ -4,7 +4,7 @@ A Figma plugin that generates mock cryptocurrency wallet addresses for UI and ma
 
 ## What it does
 
-- **Pick a chain-style format**: Ethereum (`0x…` hex), Solana (base58-style), Bitcoin (`bc1…`-style), or XRP-style strings.
+- **Pick a chain-style format**: Ethereum (`0x…` hex), Solana (base58-style), Bitcoin (`bc1…`-style), or Ripple-style strings.
 - **Preview**: See a generated address in the plugin panel; use **Refresh** to roll another mock value.
 - **Optional truncation**: Shorten the preview (and what gets created or applied) for cramped layouts.
 - **Create / Apply**: The primary button is **Create** when you’re adding new text (no selection or empty frame/group/section); **Apply** when replacing existing text. It writes to the canvas depending on selection:
