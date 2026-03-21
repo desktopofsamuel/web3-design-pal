@@ -1,0 +1,21 @@
+{
+  "name": "Web3 Design Pal",
+  "id": "1616853662451806659",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": [
+    "figma",
+    "figjam",
+    "slides",
+    "buzz"
+  ],
+  "ui": "ui.html",
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ]
+  }
+}

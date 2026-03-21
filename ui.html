@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 11px;
+      color: rgba(0, 0, 0, 0.8);
+      background: #fff;
+      overflow: hidden;
+    }
+    .root {
+      position: relative;
+      width: 100%;
+      min-height: 580px;
+      padding-bottom: 72px;
+    }
+    .top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 44px;
+      background: #2c2c2c;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px 0 10px;
+      z-index: 10;
+    }
+    .segment {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .segment-tab {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.55);
+    }
+    .segment-tab[aria-selected="true"] {
+      background: #18a0fb;
+      color: #fff;
+    }
+    .segment-tab[aria-selected="false"]:hover {
+      color: rgba(255, 255, 255, 0.85);
+    }
+    .icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.75);
+      cursor: pointer;
+    }
+    .icon-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .content-below-header {
+      padding-top: 44px;
+      position: relative;
+      width: 100%;
+      min-height: 520px;
+    }
+    .view-hidden {
+      display: none !important;
+    }
+    .preview {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      min-height: 121px;
+      max-height: 148px;
+      background: #f7f7f7;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 16px;
+      overflow: hidden;
+    }
+    .preview-inner {
+      width: 100%;
+      max-height: 116px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .preview-line {
+      font-family: ui-monospace, 'IBM Plex Mono', Menlo, Monaco, 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 16px;
+      letter-spacing: 0.055px;
+      text-align: center;
+      color: rgba(0, 0, 0, 0.8);
+      word-break: break-all;
+      margin: 0;
+      width: 100%;
+      max-width: 100%;
+    }
+    .preview-more {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 10px;
+      line-height: 14px;
+      text-align: center;
+      color: rgba(0, 0, 0, 0.45);
+      margin: 2px 0 0;
+      width: 100%;
+    }
+    .view-wallet {
+      position: relative;
+      width: 100%;
+      min-height: 500px;
+    }
+    .network-block {
+      position: absolute;
+      left: 14px;
+      top: 152px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .label-muted {
+      font-size: 11px;
+      line-height: 16px;
+      color: rgba(0, 0, 0, 0.3);
+      letter-spacing: 0.055px;
+      margin: 0;
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .chip {
+      display: flex;
+      align-items: center;
+      height: 32px;
+      padding: 6px 10px;
+      border: 2px solid transparent;
+      border-radius: 2px;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      color: rgba(0, 0, 0, 0.8);
+      letter-spacing: 0.055px;
+    }
+    .chip.selected {
+      background: rgba(0, 0, 0, 0.1);
+      border-color: #18a0fb;
+    }
+    .truncate-row {
+      position: absolute;
+      left: 14px;
+      top: 228px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .truncate-row input {
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      accent-color: #18a0fb;
+      cursor: pointer;
+    }
+    .desc {
+      position: absolute;
+      left: 14px;
+      right: 20px;
+      top: 284px;
+      font-size: 11px;
+      line-height: 16px;
+      color: rgba(0, 0, 0, 0.3);
+      letter-spacing: 0.055px;
+      margin: 0;
+    }
+    .hint-meta {
+      display: none;
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      top: 4px;
+      font-size: 10px;
+      line-height: 14px;
+      color: rgba(0, 0, 0, 0.45);
+      margin: 0;
+    }
+    .actions {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .btn {
+      flex: 1;
+      min-width: 120px;
+      padding: 8px 14px;
+      border-radius: 2px;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-gen {
+      background: rgba(0, 0, 0, 0.06);
+      color: rgba(0, 0, 0, 0.85);
+    }
+    .btn-gen:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
+    .btn-apply {
+      background: #18a0fb;
+      color: #fff;
+    }
+    .btn-apply:hover {
+      background: #0d8ce8;
+    }
+    .view-txid {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 480px;
+      padding: 32px 20px;
+      text-align: center;
+    }
+    .txid-icon {
+      color: rgba(0, 0, 0, 0.25);
+      margin-bottom: 16px;
+    }
+    .txid-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(0, 0, 0, 0.75);
+      margin: 0 0 6px;
+    }
+    .txid-sub {
+      font-size: 11px;
+      line-height: 16px;
+      color: rgba(0, 0, 0, 0.45);
+      margin: 0;
+      max-width: 220px;
+    }
+    .view-settings {
+      padding: 16px 14px 24px;
+      min-height: 480px;
+    }
+    .settings-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin: 0 0 8px;
+      color: rgba(0, 0, 0, 0.85);
+    }
+    .settings-desc {
+      font-size: 10px;
+      line-height: 14px;
+      color: rgba(0, 0, 0, 0.45);
+      margin: 0 0 16px;
+    }
+    .settings-field {
+      margin-bottom: 12px;
+    }
+    .settings-field label {
+      display: block;
+      font-size: 10px;
+      color: rgba(0, 0, 0, 0.5);
+      margin-bottom: 4px;
+    }
+    .settings-field input {
+      width: 100%;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 11px;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      border-radius: 2px;
+    }
+    .settings-actions {
+      display: flex;
+      gap: 8px; 
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+    .btn-secondary {
+      background: rgba(0, 0, 0, 0.06);
+      color: rgba(0, 0, 0, 0.85);
+    }
+    .btn-secondary:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
+    #settings-save {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      position: relative;
+    }
+    #settings-save .save-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: save-spin 0.65s linear infinite;
+      display: none;
+    }
+    #settings-save.is-loading .save-spinner {
+      display: block;
+    }
+    #settings-save.is-loading {
+      opacity: 0.92;
+      cursor: wait;
+      pointer-events: none;
+    }
+    @keyframes save-spin {
+      to { transform: rotate(360deg); }
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      transform: translateX(-50%) translateY(12px);
+      max-width: calc(100% - 28px);
+      padding: 10px 14px;
+      border-radius: 6px;
+      background: rgba(30, 30, 30, 0.92);
+      color: #fff;
+      font-size: 11px;
+      line-height: 15px;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 100;
+    }
+    .toast.toast-visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <header class="top-bar">
+      <div class="segment" role="tablist" aria-label="Mode">
+        <button type="button" class="segment-tab" role="tab" id="tab-wallet" aria-selected="true" aria-controls="view-wallet">Wallet</button>
+        <button type="button" class="segment-tab" role="tab" id="tab-txid" aria-selected="false" aria-controls="view-txid">TxID</button>
+      </div>
+      <button type="button" class="icon-btn" id="btn-settings" aria-label="Settings">
+        <!-- Lucide "settings" (MIT) -->
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </header>
+    <div class="content-below-header">
+      <div class="view-wallet" id="view-wallet" role="tabpanel">
+        <div class="preview">
+          <div class="preview-inner" id="preview-inner" aria-live="polite"></div>
+        </div>
+        <div class="network-block">
+          <p class="label-muted">Network</p>
+          <div class="chip-row" id="chips"></div>
+        </div>
+        <label class="truncate-row">
+          <input type="checkbox" id="truncate" />
+          <span>Truncate address</span>
+        </label>
+        <p class="hint-meta" id="hint-line"></p>
+        <p class="desc" id="hint"></p>
+        <div class="actions">
+          <button type="button" class="btn btn-gen" id="btn-generate">Refresh</button>
+          <button type="button" class="btn btn-apply" id="btn-apply">Create</button>
+        </div>
+      </div>
+      <div class="view-txid view-hidden" id="view-txid" role="tabpanel">
+        <div class="txid-icon" aria-hidden="true">
+          <!-- Lucide "scan-search" (MIT) -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/><path d="m16 16 2 2"/></svg>
+        </div>
+        <p class="txid-title">Coming soon</p>
+        <p class="txid-sub">Transaction ID tools will be available in a future update.</p>
+      </div>
+      <div class="view-settings view-hidden" id="view-settings">
+        <h2 class="settings-title">Truncate rules</h2>
+        <p class="settings-desc">When truncation is on, the preview and canvas use these character counts from the start and end of the address. If the sum is not less than the full length, the full address is shown.</p>
+        <div class="settings-field">
+          <label for="settings-start">Characters at start</label>
+          <input type="number" id="settings-start" min="0" max="64" value="6" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-end">Characters at end</label>
+          <input type="number" id="settings-end" min="0" max="64" value="4" />
+        </div>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-apply" id="settings-save" aria-busy="false">
+            <span class="save-spinner" aria-hidden="true"></span>
+            <span class="save-text">Save</span>
+          </button>
+          <button type="button" class="btn btn-secondary" id="settings-back">Back</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script>
+    /** @typedef {'Ethereum' | 'Solana' | 'Bitcoin' | 'XRP'} Network */
+
+    const DEFAULT_TRUNCATE = { start: 6, end: 4 };
+    /** Figma: persisted in main thread via figma.clientStorage; synced with postMessage. */
+    let cachedTruncateRules = { start: DEFAULT_TRUNCATE.start, end: DEFAULT_TRUNCATE.end };
+
+    const networks = /** @type {Network[]} */ (['Ethereum', 'Solana', 'Bitcoin', 'XRP']);
+    const PREVIEW_MAX_LINES = 5;
+    let selectedNetwork = /** @type {Network} */ ('Ethereum');
+    let truncate = false;
+    let address = '';
+    /** @type {{ mode: string; textTargetCount: number; previewBatchSize: number } | null} */
+    let lastContext = null;
+
+    /** @type {'wallet' | 'txid'} */
+    let segmentTab = 'wallet';
+    let settingsOpen = false;
+    /** Last saved / synced values for the settings inputs (detect unsaved edits). */
+    let settingsBaseline = { start: DEFAULT_TRUNCATE.start, end: DEFAULT_TRUNCATE.end };
+    let pendingSettingsSave = false;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let saveLoadingFailsafeTimer = null;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let toastHideTimer = null;
+
+    const SAVE_FAILSAFE_MS = 10000;
+
+    function setSettingsSaveLoading(loading) {
+      const btn = document.getElementById('settings-save');
+      const label = btn.querySelector('.save-text');
+      btn.classList.toggle('is-loading', loading);
+      btn.setAttribute('aria-busy', loading ? 'true' : 'false');
+      label.textContent = loading ? 'Saving…' : 'Save';
+    }
+
+    function showToast(message) {
+      const el = document.getElementById('toast');
+      if (toastHideTimer) {
+        clearTimeout(toastHideTimer);
+        toastHideTimer = null;
+      }
+      el.textContent = message;
+      el.classList.add('toast-visible');
+      toastHideTimer = setTimeout(function () {
+        el.classList.remove('toast-visible');
+        toastHideTimer = null;
+      }, 2600);
+    }
+
+    function clearSaveFailsafe() {
+      if (saveLoadingFailsafeTimer) {
+        clearTimeout(saveLoadingFailsafeTimer);
+        saveLoadingFailsafeTimer = null;
+      }
+    }
+
+    function loadTruncateRules() {
+      return {
+        start: cachedTruncateRules.start,
+        end: cachedTruncateRules.end,
+      };
+    }
+
+    function clampTruncLen(v, fallback) {
+      const n = Math.floor(Number(v));
+      if (Number.isNaN(n)) return fallback;
+      return Math.max(0, Math.min(64, n));
+    }
+
+    function applyTruncateRulesFromMain(start, end) {
+      cachedTruncateRules = {
+        start: clampTruncLen(start, DEFAULT_TRUNCATE.start),
+        end: clampTruncLen(end, DEFAULT_TRUNCATE.end),
+      };
+    }
+
+    function requestTruncateRulesFromMain() {
+      parent.postMessage({ pluginMessage: { type: 'get-truncate-rules' } }, '*');
+    }
+
+    function saveTruncateRules(start, end) {
+      const s = clampTruncLen(start, DEFAULT_TRUNCATE.start);
+      const e = clampTruncLen(end, DEFAULT_TRUNCATE.end);
+      parent.postMessage(
+        { pluginMessage: { type: 'save-truncate-rules', start: s, end: e } },
+        '*',
+      );
+    }
+
+    function syncSettingsInputs() {
+      const r = loadTruncateRules();
+      const a = document.getElementById('settings-start');
+      const b = document.getElementById('settings-end');
+      a.value = String(r.start);
+      b.value = String(r.end);
+    }
+
+    function captureSettingsBaselineFromInputs() {
+      const a = document.getElementById('settings-start');
+      const b = document.getElementById('settings-end');
+      settingsBaseline = {
+        start: clampTruncLen(a.value, DEFAULT_TRUNCATE.start),
+        end: clampTruncLen(b.value, DEFAULT_TRUNCATE.end),
+      };
+    }
+
+    function settingsInputsDirty() {
+      const a = document.getElementById('settings-start');
+      const b = document.getElementById('settings-end');
+      const s = clampTruncLen(a.value, DEFAULT_TRUNCATE.start);
+      const e = clampTruncLen(b.value, DEFAULT_TRUNCATE.end);
+      return s !== settingsBaseline.start || e !== settingsBaseline.end;
+    }
+
+    function closeSettingsIfOpenWithUnsavedHint() {
+      if (!settingsOpen) return;
+      if (settingsInputsDirty()) {
+        showToast('Changes were not saved.');
+      }
+      settingsOpen = false;
+      updateRootViews();
+    }
+
+    function updateRootViews() {
+      const w = document.getElementById('view-wallet');
+      const x = document.getElementById('view-txid');
+      const s = document.getElementById('view-settings');
+      const tabW = document.getElementById('tab-wallet');
+      const tabX = document.getElementById('tab-txid');
+
+      if (settingsOpen) {
+        w.classList.add('view-hidden');
+        x.classList.add('view-hidden');
+        s.classList.remove('view-hidden');
+      } else {
+        s.classList.add('view-hidden');
+        if (segmentTab === 'wallet') {
+          w.classList.remove('view-hidden');
+          x.classList.add('view-hidden');
+          tabW.setAttribute('aria-selected', 'true');
+          tabX.setAttribute('aria-selected', 'false');
+        } else {
+          w.classList.add('view-hidden');
+          x.classList.remove('view-hidden');
+          tabW.setAttribute('aria-selected', 'false');
+          tabX.setAttribute('aria-selected', 'true');
+        }
+      }
+    }
+
+    function randByte() {
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const a = new Uint8Array(1);
+        crypto.getRandomValues(a);
+        return a[0];
+      }
+      return Math.floor(Math.random() * 256);
+    }
+
+    function generateHex(length) {
+      const chars = '0123456789abcdef';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        result += chars[randByte() % 16];
+      }
+      return result;
+    }
+
+    function generateBase58(length) {
+      const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        result += chars[randByte() % chars.length];
+      }
+      return result;
+    }
+
+    function generateAlphaNum(length) {
+      const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        result += chars[randByte() % chars.length];
+      }
+      return result;
+    }
+
+    /**
+     * @param {Network} network
+     */
+    function generateAddress(network) {
+      switch (network) {
+        case 'Ethereum':
+          return '0x' + generateHex(40);
+        case 'Solana':
+          return generateBase58(44);
+        case 'Bitcoin':
+          return 'bc1' + generateAlphaNum(39);
+        case 'XRP':
+          return 'r' + generateBase58(33);
+        default:
+          return '';
+      }
+    }
+
+    function truncateAddress(addr) {
+      if (!truncate) return addr;
+      const { start, end } = loadTruncateRules();
+      if (start + end >= addr.length) return addr;
+      return addr.slice(0, start) + '...' + addr.slice(-end);
+    }
+
+    /**
+     * @param {string[]} samples Already-formatted lines (truncation applied if needed)
+     * @param {number} totalCount
+     */
+    function renderMultiList(samples, totalCount) {
+      const inner = document.getElementById('preview-inner');
+      inner.innerHTML = '';
+      for (const line of samples) {
+        const p = document.createElement('p');
+        p.className = 'preview-line';
+        p.textContent = line;
+        inner.appendChild(p);
+      }
+      if (totalCount > samples.length) {
+        const more = document.createElement('p');
+        more.className = 'preview-more';
+        const rest = totalCount - samples.length;
+        more.textContent = rest + ' more...';
+        inner.appendChild(more);
+      }
+    }
+
+    function renderSinglePreview() {
+      const inner = document.getElementById('preview-inner');
+      inner.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'preview-line';
+      p.textContent = address ? truncateAddress(address) : '—';
+      inner.appendChild(p);
+    }
+
+    function renderMultiPreviewMany() {
+      if (!lastContext || lastContext.previewBatchSize < 2) {
+        renderSinglePreview();
+        return;
+      }
+      const total = lastContext.previewBatchSize;
+      const n = Math.min(PREVIEW_MAX_LINES, total);
+      const samples = [];
+      for (let i = 0; i < n; i++) {
+        samples.push(truncateAddress(generateAddress(selectedNetwork)));
+      }
+      renderMultiList(samples, total);
+    }
+
+    function renderCreateInFrameBatchPreview() {
+      const inner = document.getElementById('preview-inner');
+      inner.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'preview-line';
+      p.textContent = address ? truncateAddress(address) : '—';
+      inner.appendChild(p);
+      const total = lastContext ? lastContext.previewBatchSize : 1;
+      if (total > 1) {
+        const more = document.createElement('p');
+        more.className = 'preview-more';
+        more.textContent = total + ' text layers will get this address';
+        inner.appendChild(more);
+      }
+    }
+
+    function renderPreview() {
+      if (!lastContext) {
+        renderSinglePreview();
+        return;
+      }
+      if (
+        lastContext.mode === 'retext-many' &&
+        lastContext.previewBatchSize >= 2
+      ) {
+        renderMultiPreviewMany();
+      } else if (
+        lastContext.mode === 'create-in-frame' &&
+        lastContext.previewBatchSize >= 2
+      ) {
+        renderCreateInFrameBatchPreview();
+      } else {
+        renderSinglePreview();
+      }
+    }
+
+    function syncNetworkChips() {
+      const row = document.getElementById('chips');
+      row.innerHTML = '';
+      for (const net of networks) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip' + (net === selectedNetwork ? ' selected' : '');
+        b.textContent = net;
+        b.addEventListener('click', () => {
+          selectedNetwork = net;
+          address = generateAddress(selectedNetwork);
+          syncNetworkChips();
+          renderPreview();
+        });
+        row.appendChild(b);
+      }
+    }
+
+    function syncPrimaryActionLabel() {
+      const btn = document.getElementById('btn-apply');
+      const mode = lastContext ? lastContext.mode : 'create-on-page';
+      const isCreate = mode === 'create-on-page' || mode === 'create-in-frame';
+      btn.textContent = isCreate ? 'Create' : 'Apply';
+    }
+
+    function setHintFromContext(msg) {
+      const hintLine = document.getElementById('hint-line');
+      const el = document.getElementById('hint');
+      hintLine.style.display = 'none';
+      hintLine.textContent = '';
+      if (msg.mode === 'unsupported') {
+        el.textContent = msg.unsupportedReason === 'editor'
+          ? 'Use Figma Design or FigJam. Apply is disabled here.'
+          : 'Select a frame or group, or clear selection to create text on the page.';
+      } else if (msg.mode === 'create-on-page') {
+        el.textContent = 'No selection — Create adds a new text layer on the page.';
+      } else if (msg.mode === 'create-in-frame') {
+        el.textContent = 'Create adds text inside each selected frame or group.';
+      } else if (msg.mode === 'retext-one') {
+        el.textContent = 'Apply updates 1 text layer with the preview address.';
+      } else if (msg.mode === 'retext-many') {
+        el.textContent = 'Apply updates ' + msg.textTargetCount + ' text layers (unique address per layer).';
+      } else {
+        el.textContent = '';
+      }
+    }
+
+    document.getElementById('truncate').addEventListener('change', (e) => {
+      truncate = e.target.checked;
+      renderPreview();
+    });
+
+    document.getElementById('btn-generate').addEventListener('click', () => {
+      address = generateAddress(selectedNetwork);
+      renderPreview();
+    });
+
+    document.getElementById('btn-apply').addEventListener('click', () => {
+      const rules = loadTruncateRules();
+      parent.postMessage(
+        {
+          pluginMessage: {
+            type: 'apply',
+            network: selectedNetwork,
+            previewAddress: address,
+            truncate,
+            truncateStart: rules.start,
+            truncateEnd: rules.end,
+          },
+        },
+        '*',
+      );
+    });
+
+    document.getElementById('tab-wallet').addEventListener('click', () => {
+      closeSettingsIfOpenWithUnsavedHint();
+      segmentTab = 'wallet';
+      updateRootViews();
+    });
+
+    document.getElementById('tab-txid').addEventListener('click', () => {
+      closeSettingsIfOpenWithUnsavedHint();
+      segmentTab = 'txid';
+      updateRootViews();
+    });
+
+    document.getElementById('btn-settings').addEventListener('click', () => {
+      if (settingsOpen) {
+        closeSettingsIfOpenWithUnsavedHint();
+        return;
+      }
+      settingsOpen = true;
+      syncSettingsInputs();
+      captureSettingsBaselineFromInputs();
+      updateRootViews();
+    });
+
+    document.getElementById('settings-back').addEventListener('click', () => {
+      closeSettingsIfOpenWithUnsavedHint();
+    });
+
+    document.getElementById('settings-save').addEventListener('click', () => {
+      const startEl = document.getElementById('settings-start');
+      const endEl = document.getElementById('settings-end');
+      pendingSettingsSave = true;
+      setSettingsSaveLoading(true);
+      clearSaveFailsafe();
+      saveLoadingFailsafeTimer = setTimeout(function () {
+        saveLoadingFailsafeTimer = null;
+        if (pendingSettingsSave) {
+          pendingSettingsSave = false;
+          setSettingsSaveLoading(false);
+          showToast('Could not save. Try again.');
+        }
+      }, SAVE_FAILSAFE_MS);
+      saveTruncateRules(startEl.value, endEl.value);
+    });
+
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'truncate-rules') {
+        const fromSave = pendingSettingsSave;
+        if (fromSave) {
+          pendingSettingsSave = false;
+          clearSaveFailsafe();
+          setSettingsSaveLoading(false);
+          settingsOpen = false;
+          updateRootViews();
+          showToast('Truncate rules saved');
+        }
+        applyTruncateRulesFromMain(msg.start, msg.end);
+        syncSettingsInputs();
+        captureSettingsBaselineFromInputs();
+        renderPreview();
+        return;
+      }
+      if (msg.type === 'selection-context') {
+        lastContext = {
+          mode: msg.mode,
+          textTargetCount: msg.textTargetCount,
+          previewBatchSize:
+            typeof msg.previewBatchSize === 'number'
+              ? msg.previewBatchSize
+              : msg.textTargetCount,
+        };
+        setHintFromContext(msg);
+        syncPrimaryActionLabel();
+        renderPreview();
+      }
+    };
+
+    address = generateAddress(selectedNetwork);
+    syncNetworkChips();
+    syncPrimaryActionLabel();
+    updateRootViews();
+    requestTruncateRulesFromMain();
+    renderPreview();
+  </script>
+</body>
+</html>
