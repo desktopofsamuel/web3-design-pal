@@ -1,4 +1,4 @@
-type Network = 'Ethereum' | 'Solana' | 'Bitcoin' | 'XRP';
+type Network = 'Ethereum' | 'Solana' | 'Bitcoin' | 'Ripple';
 
 type SelectionContextMode =
   | 'create-on-page'
@@ -31,6 +31,8 @@ type ApplyMessage = {
 
 const DEFAULT_TRUNCATE_START = 6;
 const DEFAULT_TRUNCATE_END = 4;
+const FOOTER_BUY_ME_COFFEE_URL = 'https://example.com/buy-me-coffee';
+const FOOTER_PROFILE_URL = 'https://desktopofsamuel.com/?ref=web3-design-pal';
 
 /** Persisted via figma.clientStorage — see https://developers.figma.com/docs/plugins/api/figma-clientStorage/ */
 const TRUNCATE_RULES_STORAGE_KEY = 'web3dpal_truncate_rules';
@@ -43,11 +45,21 @@ type SaveTruncateRulesMessage = {
   start: number;
   end: number;
 };
+type GetFooterLinksMessage = { type: 'get-footer-links' };
+type ResizeUiMessage = {
+  type: 'resize-ui';
+  height: number;
+};
 
 type TruncateRulesToUIMessage = {
   type: 'truncate-rules';
   start: number;
   end: number;
+};
+type FooterLinksToUIMessage = {
+  type: 'footer-links';
+  buyMeCoffeeUrl: string;
+  profileUrl: string;
 };
 
 type CancelMessage = { type: 'cancel' };
@@ -56,7 +68,9 @@ type PluginMessageFromUI =
   | ApplyMessage
   | CancelMessage
   | GetTruncateRulesMessage
-  | SaveTruncateRulesMessage;
+  | SaveTruncateRulesMessage
+  | GetFooterLinksMessage
+  | ResizeUiMessage;
 
 const APPENDABLE_TYPES: SceneNode['type'][] = [
   'FRAME',
@@ -91,6 +105,14 @@ async function pushTruncateRulesToUI(): Promise<void> {
   const stored = await figma.clientStorage.getAsync(TRUNCATE_RULES_STORAGE_KEY);
   const rules = normalizeStoredTruncateRules(stored);
   figma.ui.postMessage({ type: 'truncate-rules', ...rules } satisfies TruncateRulesToUIMessage);
+}
+
+function pushFooterLinksToUI(): void {
+  figma.ui.postMessage({
+    type: 'footer-links',
+    buyMeCoffeeUrl: FOOTER_BUY_ME_COFFEE_URL,
+    profileUrl: FOOTER_PROFILE_URL,
+  } satisfies FooterLinksToUIMessage);
 }
 
 function isApplySupportedEditor(): boolean {
@@ -191,7 +213,7 @@ function generateAddress(network: Network): string {
       return generateBase58(44);
     case 'Bitcoin':
       return 'bc1' + generateAlphaNum(39);
-    case 'XRP':
+    case 'Ripple':
       return 'r' + generateBase58(33);
     default:
       return '';
@@ -354,7 +376,7 @@ async function applyWalletText(msg: ApplyMessage): Promise<void> {
   figma.notify(`${targets.length} text layers updated`);
 }
 
-figma.showUI(__html__, { width: 320, height: 600 });
+figma.showUI(__html__, { width: 320, height: 560 });
 
 figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
   if (msg.type === 'cancel') {
@@ -372,6 +394,15 @@ figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
     });
     await figma.clientStorage.setAsync(TRUNCATE_RULES_STORAGE_KEY, rules);
     figma.ui.postMessage({ type: 'truncate-rules', ...rules } satisfies TruncateRulesToUIMessage);
+    return;
+  }
+  if (msg.type === 'get-footer-links') {
+    pushFooterLinksToUI();
+    return;
+  }
+  if (msg.type === 'resize-ui') {
+    const nextHeight = Math.max(420, Math.min(900, Math.floor(msg.height)));
+    figma.ui.resize(320, nextHeight);
     return;
   }
   if (msg.type === 'apply') {
@@ -393,3 +424,4 @@ if (isApplySupportedEditor()) {
 pushSelectionContext();
 
 void pushTruncateRulesToUI();
+pushFooterLinksToUI();
