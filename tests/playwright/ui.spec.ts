@@ -689,6 +689,72 @@ test.describe('Price tab', () => {
     });
     await expect(page.locator('#toast')).toContainText('Rate limit reached');
   });
+
+  test('initial state before Scan shows "No frame or group selected" hint', async ({ page }) => {
+    await openPriceTab(page);
+    // priceCards is null — no scan has been triggered yet
+    await expect(page.locator('#price-no-selection')).toContainText(
+      'No frame or group selected in Figma.',
+    );
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  test('scan result for empty frame (no variable layers) shows "No matching layer names"', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    // Simulate Figma main thread: frame scanned but had no {crypto}/{price} layers
+    await postSelectionContext(page, { type: 'price-layer-scan', cards: [] });
+    await expect(page.locator('#price-no-selection')).toContainText(
+      'No matching layer names found in selection.',
+    );
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  test('unknown coin in textarea still fires apply-price with fallback dash for price', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    // Override textarea to only contain a symbol not in MOCK_COINS
+    await page.locator('#price-coin-input').fill('FAKECOIN');
+
+    await postScanResult(page, MOCK_CARDS);
+    // Mock responds with MOCK_COINS — FAKECOIN is absent, so cachedCoinData['FAKECOIN'] is undefined
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    expect(Array.isArray(replacements)).toBe(true);
+    expect(replacements.length).toBeGreaterThan(0);
+
+    // crypto role → the unknown symbol literal
+    const cryptoReplacement = replacements.find((r) => r.nodeId === 'n1' || r.nodeId === 'n3');
+    expect(cryptoReplacement?.newText).toBe('FAKECOIN');
+
+    // price role → fallback '—' because no data for FAKECOIN
+    const priceReplacement = replacements.find((r) => r.nodeId === 'n2' || r.nodeId === 'n4');
+    expect(priceReplacement?.newText).toBe('—');
+  });
 });
 
 // ─── Settings — Price API Keys + Price formatting ─────────────────────────────
@@ -705,20 +771,25 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
     await page.getByRole('button', { name: 'Settings' }).click();
   });
 
-  test('Price API Keys section is visible with both key inputs', async ({ page }) => {
+  test('Price API Keys section is visible with CoinGecko key input', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Price API Keys' })).toBeVisible();
     await expect(page.locator('#settings-cg-key')).toBeVisible();
-    await expect(page.locator('#settings-cmc-key')).toBeVisible();
+    // CMC field is hidden
+    await expect(page.locator('#settings-cmc-key')).toBeHidden();
   });
 
-  test('Price formatting section is visible with correct defaults', async ({ page }) => {
+  test('Price formatting section has Decimal places field and format checkboxes', async ({
+    page,
+  }) => {
     await expect(page.getByRole('heading', { name: 'Price formatting' })).toBeVisible();
+    // Decimal places uses the same settings-field style as "Characters at start"
+    await expect(page.getByLabel('Decimal places')).toBeVisible();
+    await expect(page.getByLabel('Decimal places')).toHaveValue('2');
     await expect(page.locator('#price-show-symbol')).toBeChecked();
     await expect(page.locator('#price-show-commas')).toBeChecked();
-    await expect(page.locator('#price-decimals')).toHaveValue('2');
   });
 
-  test('Save API Keys posts save-api-keys with entered keys', async ({ page }) => {
+  test('Save API Keys with valid CG- key posts save-api-keys', async ({ page }) => {
     await page.evaluate(() => {
       const w = window as unknown as { __apiKeyCapture: Record<string, unknown> | null };
       w.__apiKeyCapture = null;
@@ -731,8 +802,7 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
       });
     });
 
-    await page.locator('#settings-cg-key').fill('cg-test-key');
-    await page.locator('#settings-cmc-key').fill('cmc-test-key');
+    await page.locator('#settings-cg-key').fill('CG-validkey123');
     await page.getByRole('button', { name: 'Save API Keys' }).click();
 
     const msg = await page.evaluate(
@@ -742,22 +812,77 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
 
     expect(msg).not.toBeNull();
     expect(msg!.type).toBe('save-api-keys');
-    expect(msg!.coingeckoKey).toBe('cg-test-key');
-    expect(msg!.cmcKey).toBe('cmc-test-key');
+    expect(msg!.coingeckoKey).toBe('CG-validkey123');
   });
 
-  test('API key inputs are pre-filled when keys are stored', async ({ page }) => {
-    // Store keys via the mock storage key before reloading.
+  test('API key input is pre-filled when key is stored', async ({ page }) => {
     await page.evaluate(() => {
       localStorage.setItem(
         'web3dpal_api_keys',
-        JSON.stringify({ cgKey: 'stored-cg-key', cmcKey: 'stored-cmc-key' }),
+        JSON.stringify({ cgKey: 'CG-stored123', cmcKey: '' }),
       );
     });
     await page.reload();
     await page.getByRole('button', { name: 'Settings' }).click();
 
-    await expect(page.locator('#settings-cg-key')).toHaveValue('stored-cg-key');
-    await expect(page.locator('#settings-cmc-key')).toHaveValue('stored-cmc-key');
+    await expect(page.locator('#settings-cg-key')).toHaveValue('CG-stored123');
+  });
+
+  test('invalid key format shows inline error and does not post save-api-keys', async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      const w = window as unknown as { __apiKeyCapture: Record<string, unknown> | null };
+      w.__apiKeyCapture = null;
+      window.addEventListener('message', (e: Event) => {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'save-api-keys') w.__apiKeyCapture = pm;
+      });
+    });
+
+    await page.locator('#settings-cg-key').fill('not-a-valid-key');
+    await page.getByRole('button', { name: 'Save API Keys' }).click();
+
+    await expect(page.locator('#settings-cg-key-error')).toBeVisible();
+    const captured = await page.evaluate(
+      () =>
+        (window as unknown as { __apiKeyCapture: Record<string, unknown> | null }).__apiKeyCapture,
+    );
+    expect(captured).toBeNull();
+  });
+
+  test('typing in the CG key field clears the inline error', async ({ page }) => {
+    // Trigger error first
+    await page.locator('#settings-cg-key').fill('bad');
+    await page.getByRole('button', { name: 'Save API Keys' }).click();
+    await expect(page.locator('#settings-cg-key-error')).toBeVisible();
+
+    // Typing should clear it immediately
+    await page.locator('#settings-cg-key').fill('CG-abc');
+    await expect(page.locator('#settings-cg-key-error')).toBeHidden();
+  });
+
+  test('empty key is allowed and posts save-api-keys with empty string', async ({ page }) => {
+    await page.evaluate(() => {
+      const w = window as unknown as { __apiKeyCapture: Record<string, unknown> | null };
+      w.__apiKeyCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'save-api-keys') {
+          w.__apiKeyCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    // Leave the CG key empty and click save
+    await page.getByRole('button', { name: 'Save API Keys' }).click();
+
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __apiKeyCapture: Record<string, unknown> | null }).__apiKeyCapture,
+    );
+    expect(msg).not.toBeNull();
+    expect(msg!.coingeckoKey).toBe('');
   });
 });
