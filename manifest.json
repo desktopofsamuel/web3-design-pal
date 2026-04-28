@@ -15,7 +15,7 @@
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
-      "none"
+      "https://pro-api.coinmarketcap.com"
     ]
   }
 }

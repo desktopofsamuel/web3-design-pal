@@ -36,6 +36,7 @@ const FOOTER_PROFILE_URL = 'https://desktopofsamuel.com/?ref=web3-design-pal';
 
 /** Persisted via figma.clientStorage — see https://developers.figma.com/docs/plugins/api/figma-clientStorage/ */
 const TRUNCATE_RULES_STORAGE_KEY = 'web3dpal_truncate_rules';
+const CMC_API_KEY_STORAGE_KEY = 'web3dpal_cmc_api_key';
 
 type TruncateRulesPayload = { start: number; end: number };
 
@@ -64,13 +65,44 @@ type FooterLinksToUIMessage = {
 
 type CancelMessage = { type: 'cancel' };
 
+type GetCmcApiKeyMessage  = { type: 'get-cmc-api-key' };
+type SaveCmcApiKeyMessage = { type: 'save-cmc-api-key'; key: string };
+type ScanPriceLayersMessage = {
+  type: 'scan-price-layers';
+  cryptoVar: string;
+  priceVar: string;
+};
+type ApplyPriceMessage = {
+  type: 'apply-price';
+  replacements: Array<{ nodeId: string; newText: string }>;
+};
+
+type CmcApiKeyToUIMessage = { type: 'cmc-api-key'; key: string };
+
+type PriceLayerMatch = {
+  nodeId: string;
+  layerName: string;
+  currentText: string;
+  role: 'crypto' | 'price';
+};
+
+type PriceLayerScanResult = {
+  type: 'price-layer-scan';
+  groupName: string | null;
+  matches: PriceLayerMatch[];
+};
+
 type PluginMessageFromUI =
   | ApplyMessage
   | CancelMessage
   | GetTruncateRulesMessage
   | SaveTruncateRulesMessage
   | GetFooterLinksMessage
-  | ResizeUiMessage;
+  | ResizeUiMessage
+  | GetCmcApiKeyMessage
+  | SaveCmcApiKeyMessage
+  | ScanPriceLayersMessage
+  | ApplyPriceMessage;
 
 const APPENDABLE_TYPES: SceneNode['type'][] = [
   'FRAME',
@@ -113,6 +145,58 @@ function pushFooterLinksToUI(): void {
     buyMeCoffeeUrl: FOOTER_BUY_ME_COFFEE_URL,
     profileUrl: FOOTER_PROFILE_URL,
   } satisfies FooterLinksToUIMessage);
+}
+
+async function pushCmcApiKeyToUI(): Promise<void> {
+  const stored = await figma.clientStorage.getAsync(CMC_API_KEY_STORAGE_KEY);
+  const key = typeof stored === 'string' ? stored : '';
+  figma.ui.postMessage({ type: 'cmc-api-key', key } satisfies CmcApiKeyToUIMessage);
+}
+
+function scanPriceLayers(cryptoVar: string, priceVar: string): void {
+  if (!isApplySupportedEditor()) {
+    figma.ui.postMessage({ type: 'price-layer-scan', groupName: null, matches: [] } satisfies PriceLayerScanResult);
+    return;
+  }
+
+  const sel = figma.currentPage.selection;
+  if (sel.length === 0) {
+    figma.ui.postMessage({ type: 'price-layer-scan', groupName: null, matches: [] } satisfies PriceLayerScanResult);
+    return;
+  }
+
+  const root = sel[0];
+  const groupName = root.name;
+  const matches: PriceLayerMatch[] = [];
+
+  const texts = collectTextTargets([root]);
+  for (const t of texts) {
+    if (t.name === cryptoVar) {
+      matches.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'crypto' });
+    } else if (t.name === priceVar) {
+      matches.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'price' });
+    }
+  }
+
+  figma.ui.postMessage({ type: 'price-layer-scan', groupName, matches } satisfies PriceLayerScanResult);
+}
+
+async function applyPriceReplacements(
+  replacements: Array<{ nodeId: string; newText: string }>,
+): Promise<void> {
+  let applied = 0;
+  for (const { nodeId, newText } of replacements) {
+    const node = figma.getNodeById(nodeId);
+    if (node && node.type === 'TEXT') {
+      await setTextCharacters(node, newText);
+      applied++;
+    }
+  }
+  figma.notify(
+    applied > 0
+      ? `Updated ${applied} layer${applied > 1 ? 's' : ''}.`
+      : 'No layers updated.',
+  );
 }
 
 function isApplySupportedEditor(): boolean {
@@ -412,6 +496,29 @@ figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
       const err = e instanceof Error ? e.message : String(e);
       figma.notify(`Could not apply: ${err}`);
     }
+    return;
+  }
+  if (msg.type === 'get-cmc-api-key') {
+    await pushCmcApiKeyToUI();
+    return;
+  }
+  if (msg.type === 'save-cmc-api-key') {
+    const key = typeof msg.key === 'string' ? msg.key.trim() : '';
+    await figma.clientStorage.setAsync(CMC_API_KEY_STORAGE_KEY, key);
+    figma.ui.postMessage({ type: 'cmc-api-key', key } satisfies CmcApiKeyToUIMessage);
+    return;
+  }
+  if (msg.type === 'scan-price-layers') {
+    scanPriceLayers(msg.cryptoVar, msg.priceVar);
+    return;
+  }
+  if (msg.type === 'apply-price') {
+    try {
+      await applyPriceReplacements(msg.replacements);
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      figma.notify(`Apply failed: ${err}`);
+    }
   }
 };
 
@@ -425,3 +532,4 @@ pushSelectionContext();
 
 void pushTruncateRulesToUI();
 pushFooterLinksToUI();
+void pushCmcApiKeyToUI();
