@@ -15,6 +15,7 @@
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
+      "https://api.coingecko.com",
       "https://pro-api.coinmarketcap.com"
     ]
   }
