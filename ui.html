@@ -451,6 +451,16 @@
     }
     .price-layer-arrow { color: #18a0fb; font-weight: 600; flex-shrink: 0; }
     .price-layer-new { font-weight: 600; color: rgba(0,0,0,0.85); flex-shrink: 0; }
+    .price-card-header {
+      font-size: 10px;
+      font-weight: 600;
+      color: rgba(0,0,0,0.4);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 0 3px;
+      border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .price-card-header:first-child { border-top: none; padding-top: 0; }
     .toast {
       position: fixed;
       left: 50%;
@@ -541,9 +551,7 @@
         <p class="txid-sub">Transaction ID tools will be available in a future update.</p>
       </div>
       <div class="view-price view-hidden" id="view-price" role="tabpanel">
-        <div class="price-banner view-hidden" id="price-no-api-banner">
-          No API key — <a id="price-open-settings">Open Settings</a> to add your CoinMarketCap key.
-        </div>
+        <div class="price-banner view-hidden" id="price-source-banner"></div>
         <div class="price-section">
           <p class="label-muted">Variable names (match Figma layer names)</p>
           <div class="price-var-row">
@@ -591,14 +599,18 @@
             <span class="save-text">Save</span>
           </button>
         </div>
-        <h2 class="settings-title" style="margin-top:20px;">CoinMarketCap API</h2>
-        <p class="settings-desc">Key is stored locally in Figma client storage and only sent to the CoinMarketCap API.</p>
+        <h2 class="settings-title" style="margin-top:20px;">Price API Keys</h2>
+        <p class="settings-desc">Keys are stored locally in Figma client storage. CMC is used if set, otherwise CoinGecko (free tier, no key required).</p>
         <div class="settings-field">
-          <label for="settings-cmc-key">API Key</label>
+          <label for="settings-cg-key">CoinGecko Demo API Key (optional)</label>
+          <input type="password" id="settings-cg-key" autocomplete="off" placeholder="Paste key here" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-cmc-key">CoinMarketCap API Key (optional)</label>
           <input type="password" id="settings-cmc-key" autocomplete="off" placeholder="Paste key here" />
         </div>
         <div class="settings-actions" style="margin-top:8px;">
-          <button type="button" class="btn btn-apply" id="settings-cmc-save">Save API Key</button>
+          <button type="button" class="btn btn-apply" id="settings-apikeys-save">Save API Keys</button>
         </div>
       </div>
     </div>
@@ -633,15 +645,18 @@
     let settingsOpen = false;
 
     // Price tab state
-    let selectedCoin = 'ETH';
+    let selectedCoins = ['ETH', 'BTC', 'SOL', 'XRP'];
     const priceCoins = ['ETH', 'BTC', 'SOL', 'XRP'];
     /** @type {Record<string, number | null>} */
     let cachedPrices = {};
-    let cmcApiKey = '';
+    let coingeckoKey = '';
+    let cmcKey = '';
     let priceLoaded = false;
     let priceFetching = false;
-    /** @type {Array<{nodeId:string, layerName:string, currentText:string, role:string}> | null} */
-    let priceLayerMatches = null;
+    /** @type {Array<{cardName:string, matches:Array<{nodeId:string,layerName:string,currentText:string,role:string}>}> | null} */
+    let priceCards = null;
+    /** @type {string[]} */
+    let cardCoinAssignments = [];
     /** Last saved / synced values for the settings inputs (detect unsaved edits). */
     let settingsBaseline = { start: DEFAULT_TRUNCATE.start, end: DEFAULT_TRUNCATE.end };
     let pendingSettingsSave = false;
@@ -990,15 +1005,6 @@
 
     // ── Price tab functions ────────────────────────────────────────────────
 
-    function updatePriceNoApiBanner() {
-      const banner = document.getElementById('price-no-api-banner');
-      if (!cmcApiKey) {
-        banner.classList.remove('view-hidden');
-      } else {
-        banner.classList.add('view-hidden');
-      }
-    }
-
     function formatPrice(raw) {
       const sym = document.getElementById('price-show-symbol').checked;
       const commas = document.getElementById('price-show-commas').checked;
@@ -1015,15 +1021,26 @@
       for (const coin of priceCoins) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'chip' + (coin === selectedCoin ? ' selected' : '');
+        b.className = 'chip' + (selectedCoins.includes(coin) ? ' selected' : '');
         b.textContent = coin;
         b.addEventListener('click', () => {
-          selectedCoin = coin;
+          if (selectedCoins.includes(coin)) {
+            if (selectedCoins.length > 1) selectedCoins = selectedCoins.filter(c => c !== coin);
+          } else {
+            selectedCoins = [...selectedCoins, coin];
+          }
           syncPriceCoinChips();
-          if (priceLoaded) renderPriceScanResults(true);
+          if (priceLoaded) { assignCoinsToCards(); renderPriceScanResults(true); }
         });
         row.appendChild(b);
       }
+    }
+
+    function assignCoinsToCards() {
+      if (!priceCards) return;
+      cardCoinAssignments = priceCards.map(() =>
+        selectedCoins[Math.floor(Math.random() * selectedCoins.length)],
+      );
     }
 
     function renderPriceScanResults(previewMode) {
@@ -1031,8 +1048,8 @@
       const list = document.getElementById('price-layer-list');
       const applyBtn = document.getElementById('price-apply-btn');
 
-      if (!priceLayerMatches || priceLayerMatches.length === 0) {
-        const msg = priceLayerMatches !== null
+      if (!priceCards || priceCards.length === 0) {
+        const msg = priceCards !== null
           ? 'No matching layer names found in selection.'
           : 'No frame or group selected in Figma.';
         noSel.textContent = msg;
@@ -1046,89 +1063,102 @@
       list.classList.remove('view-hidden');
       list.innerHTML = '';
 
-      for (const m of priceLayerMatches) {
-        const item = document.createElement('div');
-        item.className = 'price-layer-item';
+      for (let i = 0; i < priceCards.length; i++) {
+        const card = priceCards[i];
+        const coin = cardCoinAssignments[i] ?? selectedCoins[0];
 
-        const left = document.createElement('div');
-        left.className = 'price-layer-left';
-
-        const tag = document.createElement('span');
-        tag.className = 'price-layer-name-tag';
-        tag.textContent = m.layerName;
-        left.appendChild(tag);
-
-        if (m.currentText) {
-          const old = document.createElement('span');
-          old.className = 'price-layer-old';
-          old.textContent = m.currentText;
-          left.appendChild(old);
+        if (priceCards.length > 1) {
+          const header = document.createElement('div');
+          header.className = 'price-card-header';
+          header.textContent = card.cardName;
+          list.appendChild(header);
         }
 
-        item.appendChild(left);
+        for (const m of card.matches) {
+          const item = document.createElement('div');
+          item.className = 'price-layer-item';
 
-        if (previewMode) {
-          const arrow = document.createElement('span');
-          arrow.className = 'price-layer-arrow';
-          arrow.textContent = '→';
-          item.appendChild(arrow);
+          const left = document.createElement('div');
+          left.className = 'price-layer-left';
 
-          const newVal = document.createElement('span');
-          newVal.className = 'price-layer-new';
-          const price = cachedPrices[selectedCoin];
-          if (m.role === 'crypto') {
-            newVal.textContent = selectedCoin;
-          } else if (price !== null && price !== undefined) {
-            newVal.textContent = formatPrice(price);
-          } else {
-            newVal.textContent = '—';
+          const tag = document.createElement('span');
+          tag.className = 'price-layer-name-tag';
+          tag.textContent = m.layerName;
+          left.appendChild(tag);
+
+          if (m.currentText) {
+            const old = document.createElement('span');
+            old.className = 'price-layer-old';
+            old.textContent = m.currentText;
+            left.appendChild(old);
           }
-          item.appendChild(newVal);
-        }
 
-        list.appendChild(item);
+          item.appendChild(left);
+
+          if (previewMode) {
+            const arrow = document.createElement('span');
+            arrow.className = 'price-layer-arrow';
+            arrow.textContent = '→';
+            item.appendChild(arrow);
+
+            const newVal = document.createElement('span');
+            newVal.className = 'price-layer-new';
+            const price = cachedPrices[coin];
+            if (m.role === 'crypto') {
+              newVal.textContent = coin;
+            } else if (price !== null && price !== undefined) {
+              newVal.textContent = formatPrice(price);
+            } else {
+              newVal.textContent = '—';
+            }
+            item.appendChild(newVal);
+          }
+
+          list.appendChild(item);
+        }
       }
 
-      applyBtn.disabled = !(previewMode && priceLayerMatches.length > 0);
+      applyBtn.disabled = !(previewMode && priceCards.length > 0);
     }
 
-    async function fetchCmcPrices() {
-      if (!cmcApiKey) { showToast('Add your API key in Settings first.'); return; }
+    function fetchPrices() {
       if (priceFetching) return;
       priceFetching = true;
       const btn = document.getElementById('price-scan-btn');
       btn.textContent = 'Fetching…';
       btn.disabled = true;
-      try {
-        const resp = await fetch(
-          `https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=${priceCoins.join(',')}`,
-          { headers: { 'X-CMC_PRO_API_KEY': cmcApiKey, 'Accept': 'application/json' } },
-        );
-        if (!resp.ok) {
-          showToast(resp.status === 401 ? 'Invalid API key.' : `API error: ${resp.status}`);
-          return;
-        }
-        const json = await resp.json();
-        for (const coin of priceCoins) {
-          cachedPrices[coin] = json.data?.[coin]?.quote?.USD?.price ?? null;
-        }
-        priceLoaded = true;
-        renderPriceScanResults(true);
-        showToast('Price fetched.');
-      } catch (_err) {
-        showToast('Network error. Check your connection.');
-      } finally {
-        priceFetching = false;
-        btn.textContent = 'Scan';
-        btn.disabled = false;
+      parent.postMessage({ pluginMessage: { type: 'fetch-prices', symbols: priceCoins } }, '*');
+    }
+
+    function handlePricesResult(msg) {
+      priceFetching = false;
+      const btn = document.getElementById('price-scan-btn');
+      btn.textContent = 'Scan';
+      btn.disabled = false;
+
+      if (msg.error) {
+        showToast(msg.error);
+        return;
       }
+      cachedPrices = msg.prices || {};
+      priceLoaded = true;
+
+      const banner = document.getElementById('price-source-banner');
+      if (msg.source) {
+        banner.textContent = `Prices via ${msg.source === 'coinmarketcap' ? 'CoinMarketCap' : 'CoinGecko'}.`;
+        banner.classList.remove('view-hidden');
+      }
+
+      assignCoinsToCards();
+      renderPriceScanResults(true);
     }
 
     function triggerScan() {
       const cryptoVar = document.getElementById('price-var-crypto').value.trim() || '{crypto}';
       const priceVar = document.getElementById('price-var-price').value.trim() || '{price}';
       priceLoaded = false;
-      priceLayerMatches = null;
+      priceCards = null;
+      cardCoinAssignments = [];
       renderPriceScanResults(false);
       parent.postMessage({ pluginMessage: { type: 'scan-price-layers', cryptoVar, priceVar } }, '*');
     }
@@ -1139,34 +1169,32 @@
       closeSettingsIfOpenWithUnsavedHint();
       segmentTab = 'price';
       updateRootViews();
-      updatePriceNoApiBanner();
-    });
-
-    document.getElementById('price-open-settings').addEventListener('click', () => {
-      settingsOpen = true;
-      syncSettingsInputs();
-      document.getElementById('settings-cmc-key').value = cmcApiKey;
-      captureSettingsBaselineFromInputs();
-      updateRootViews();
     });
 
     document.getElementById('price-scan-btn').addEventListener('click', triggerScan);
 
     document.getElementById('price-apply-btn').addEventListener('click', () => {
-      if (!priceLayerMatches || !priceLoaded) return;
-      const replacements = priceLayerMatches.map(m => ({
-        nodeId: m.nodeId,
-        newText: m.role === 'crypto'
-          ? selectedCoin
-          : formatPrice(cachedPrices[selectedCoin] ?? 0),
-      }));
+      if (!priceCards || !priceLoaded) return;
+      const replacements = [];
+      for (let i = 0; i < priceCards.length; i++) {
+        const coin = cardCoinAssignments[i] ?? selectedCoins[0];
+        for (const m of priceCards[i].matches) {
+          replacements.push({
+            nodeId: m.nodeId,
+            newText: m.role === 'crypto'
+              ? coin
+              : formatPrice(cachedPrices[coin] ?? 0),
+          });
+        }
+      }
       parent.postMessage({ pluginMessage: { type: 'apply-price', replacements } }, '*');
     });
 
-    document.getElementById('settings-cmc-save').addEventListener('click', () => {
-      const key = document.getElementById('settings-cmc-key').value.trim();
-      parent.postMessage({ pluginMessage: { type: 'save-cmc-api-key', key } }, '*');
-      showToast('API key saved.');
+    document.getElementById('settings-apikeys-save').addEventListener('click', () => {
+      const cgKey = document.getElementById('settings-cg-key').value.trim();
+      const cKey = document.getElementById('settings-cmc-key').value.trim();
+      parent.postMessage({ pluginMessage: { type: 'save-api-keys', coingeckoKey: cgKey, cmcKey: cKey } }, '*');
+      showToast('API keys saved.');
     });
 
     ['price-show-symbol', 'price-show-commas', 'price-decimals'].forEach(id => {
@@ -1223,7 +1251,8 @@
       }
       settingsOpen = true;
       syncSettingsInputs();
-      document.getElementById('settings-cmc-key').value = cmcApiKey;
+      document.getElementById('settings-cg-key').value = coingeckoKey;
+      document.getElementById('settings-cmc-key').value = cmcKey;
       captureSettingsBaselineFromInputs();
       updateRootViews();
     });
@@ -1286,17 +1315,24 @@
         renderPreview();
         return;
       }
-      if (msg.type === 'cmc-api-key') {
-        cmcApiKey = typeof msg.key === 'string' ? msg.key : '';
-        const keyEl = document.getElementById('settings-cmc-key');
-        if (keyEl) keyEl.value = cmcApiKey;
-        updatePriceNoApiBanner();
+      if (msg.type === 'api-keys') {
+        coingeckoKey = typeof msg.coingeckoKey === 'string' ? msg.coingeckoKey : '';
+        cmcKey = typeof msg.cmcKey === 'string' ? msg.cmcKey : '';
+        const cgEl = document.getElementById('settings-cg-key');
+        const cmcEl = document.getElementById('settings-cmc-key');
+        if (cgEl) cgEl.value = coingeckoKey;
+        if (cmcEl) cmcEl.value = cmcKey;
         return;
       }
       if (msg.type === 'price-layer-scan') {
-        priceLayerMatches = msg.matches || [];
+        priceCards = (msg.cards && msg.cards.length > 0) ? msg.cards : null;
+        cardCoinAssignments = [];
         renderPriceScanResults(false);
-        if (cmcApiKey && priceLayerMatches.length > 0) fetchCmcPrices();
+        if (priceCards) fetchPrices();
+        return;
+      }
+      if (msg.type === 'prices-result') {
+        handlePricesResult(msg);
         return;
       }
     };
@@ -1309,8 +1345,7 @@
     requestTruncateRulesFromMain();
     requestFooterLinksFromMain();
     renderPreview();
-    updatePriceNoApiBanner();
-    parent.postMessage({ pluginMessage: { type: 'get-cmc-api-key' } }, '*');
+    parent.postMessage({ pluginMessage: { type: 'get-api-keys' } }, '*');
   </script>
 </body>
 </html>
