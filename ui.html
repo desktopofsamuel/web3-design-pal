@@ -1064,12 +1064,23 @@
       return coins.length > 0 ? coins : ['ETH'];
     }
 
+    function shuffled(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
     function assignCoinsToCards() {
       if (!priceCards) return;
       const coins = getPriceCoins();
-      cardCoinAssignments = priceCards.map(() =>
-        coins[Math.floor(Math.random() * coins.length)],
-      );
+      // Build a pool large enough for all cards, refilling with a fresh shuffle
+      // each time we exhaust the list — guarantees no duplicates within each round.
+      const pool = [];
+      while (pool.length < priceCards.length) pool.push(...shuffled(coins));
+      cardCoinAssignments = priceCards.map((_, i) => pool[i]);
     }
 
     function renderPriceScanResults(previewMode) {
