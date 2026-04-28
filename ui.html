@@ -377,21 +377,19 @@
     }
     /* Price tab */
     .price-section { padding: 12px 14px 0; }
-    .price-var-row { display: flex; gap: 8px; }
-    .price-var-row label {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      font-size: 10px;
-      color: rgba(0,0,0,0.5);
-    }
-    .price-var-row input[type=text] {
-      width: 110px;
-      padding: 5px 7px;
-      font: inherit;
+    .price-var-desc {
       font-size: 11px;
-      border: 1px solid rgba(0,0,0,0.15);
-      border-radius: 2px;
+      line-height: 17px;
+      color: rgba(0,0,0,0.45);
+      margin: 0;
+    }
+    .var-token {
+      font-family: ui-monospace, 'IBM Plex Mono', Menlo, monospace;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(0,0,0,0.06);
+      color: rgba(0,0,0,0.7);
     }
     .price-format-row {
       display: flex;
@@ -597,12 +595,11 @@
       <div class="view-price view-hidden" id="view-price" role="tabpanel">
         <div class="price-banner view-hidden" id="price-source-banner"></div>
         <div class="price-section">
-          <p class="label-muted">Variable names (match Figma layer names)</p>
-          <div class="price-var-row">
-            <label>Ticker<input type="text" id="price-var-crypto" value="{crypto}" /></label>
-            <label>Price<input type="text" id="price-var-price" value="{price}" /></label>
-          </div>
+          <p class="price-var-desc">Name your Figma layers <code class="var-token">{crypto}</code> for the ticker and <code class="var-token">{price}</code> for the USD price. Scan finds all matching layer names in your selection.</p>
         </div>
+        <!-- hidden inputs keep default values for triggerScan() -->
+        <input type="hidden" id="price-var-crypto" value="{crypto}" />
+        <input type="hidden" id="price-var-price" value="{price}" />
         <div class="price-section">
           <p class="label-muted">Coins (comma-separated, one picked at random per card)</p>
           <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP</textarea>
