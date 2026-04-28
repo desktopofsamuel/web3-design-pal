@@ -608,14 +608,6 @@
           <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP</textarea>
         </div>
         <div class="price-section">
-          <p class="label-muted">Format</p>
-          <div class="price-format-row">
-            <label><input type="checkbox" id="price-show-symbol" checked /> $ symbol</label>
-            <label><input type="checkbox" id="price-show-commas" checked /> Commas</label>
-            <label>Decimals <input type="number" id="price-decimals" value="2" min="0" max="8" /></label>
-          </div>
-        </div>
-        <div class="price-section">
           <p class="label-muted">Layers found in selection</p>
           <div id="price-no-selection" class="desc">No frame or group selected in Figma.</div>
           <div id="price-scan-summary" class="view-hidden"></div>
@@ -656,6 +648,15 @@
         </div>
         <div class="settings-actions" style="margin-top:8px;">
           <button type="button" class="btn btn-apply" id="settings-apikeys-save">Save API Keys</button>
+        </div>
+        <h2 class="settings-title" style="margin-top:20px;">Price formatting</h2>
+        <p class="settings-desc">Controls how price, volume, and market cap values are displayed when inserted into Figma.</p>
+        <div class="settings-field">
+          <div class="price-format-row">
+            <label><input type="checkbox" id="price-show-symbol" checked /> $ symbol</label>
+            <label><input type="checkbox" id="price-show-commas" checked /> Commas</label>
+            <label>Decimals <input type="number" id="price-decimals" value="2" min="0" max="8" /></label>
+          </div>
         </div>
       </div>
     </div>
