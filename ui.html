@@ -595,11 +595,14 @@
       <div class="view-price view-hidden" id="view-price" role="tabpanel">
         <div class="price-banner view-hidden" id="price-source-banner"></div>
         <div class="price-section">
-          <p class="price-var-desc">Name your Figma layers <code class="var-token">{crypto}</code> for the ticker and <code class="var-token">{price}</code> for the USD price. Scan finds all matching layer names in your selection.</p>
+          <p class="price-var-desc">Name your Figma layers <code class="var-token">{crypto}</code> ticker, <code class="var-token">{price}</code> USD price, <code class="var-token">{change}</code> 24h % change, <code class="var-token">{volume}</code> 24h volume, or <code class="var-token">{mcap}</code> market cap. Scan finds all matching layer names in your selection.</p>
         </div>
-        <!-- hidden inputs keep default values for triggerScan() -->
+        <!-- hidden inputs keep default variable names for triggerScan() -->
         <input type="hidden" id="price-var-crypto" value="{crypto}" />
         <input type="hidden" id="price-var-price" value="{price}" />
+        <input type="hidden" id="price-var-change" value="{change}" />
+        <input type="hidden" id="price-var-volume" value="{volume}" />
+        <input type="hidden" id="price-var-mcap" value="{mcap}" />
         <div class="price-section">
           <p class="label-muted">Coins (comma-separated, one picked at random per card)</p>
           <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP</textarea>
@@ -687,8 +690,8 @@
     let settingsOpen = false;
 
     // Price tab state — coins read live from #price-coin-input
-    /** @type {Record<string, number | null>} */
-    let cachedPrices = {};
+    /** @type {Record<string, {price:number|null, change:number|null, volume:number|null, mcap:number|null}>} */
+    let cachedCoinData = {};
     let coingeckoKey = '';
     let cmcKey = '';
     let priceLoaded = false;
@@ -1055,6 +1058,34 @@
       return sym ? `$${num}` : num;
     }
 
+    /** +2.31% or -1.42% — always 2 dp with sign */
+    function formatChange(raw) {
+      const sign = raw >= 0 ? '+' : '';
+      return `${sign}${raw.toFixed(2)}%`;
+    }
+
+    /** Abbreviated with $ prefix: $1.25T, $28.4B, $920M */
+    function formatLarge(raw) {
+      const sym = document.getElementById('price-show-symbol').checked;
+      const prefix = sym ? '$' : '';
+      const abs = Math.abs(raw);
+      let str;
+      if (abs >= 1e12)      str = (raw / 1e12).toFixed(2) + 'T';
+      else if (abs >= 1e9)  str = (raw / 1e9).toFixed(2) + 'B';
+      else if (abs >= 1e6)  str = (raw / 1e6).toFixed(2) + 'M';
+      else                  str = raw.toFixed(0);
+      return prefix + str;
+    }
+
+    function valueForRole(role, coinData) {
+      if (!coinData) return '—';
+      if (role === 'price')  return coinData.price  != null ? formatPrice(coinData.price)   : '—';
+      if (role === 'change') return coinData.change != null ? formatChange(coinData.change)  : '—';
+      if (role === 'volume') return coinData.volume != null ? formatLarge(coinData.volume)   : '—';
+      if (role === 'mcap')   return coinData.mcap   != null ? formatLarge(coinData.mcap)     : '—';
+      return '—';
+    }
+
     function getPriceCoins() {
       const raw = document.getElementById('price-coin-input').value;
       const coins = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0);
@@ -1097,9 +1128,11 @@
         return;
       }
 
-      // Count proper pairs (cards that have both a crypto and a price match)
+      // A "pair" = card has {crypto} + at least one data field (price/change/volume/mcap)
+      const DATA_ROLES = ['price', 'change', 'volume', 'mcap'];
       const pairCount = priceCards.filter(c =>
-        c.matches.some(m => m.role === 'crypto') && c.matches.some(m => m.role === 'price'),
+        c.matches.some(m => m.role === 'crypto') &&
+        c.matches.some(m => DATA_ROLES.includes(m.role)),
       ).length;
       const partialCount = priceCards.length - pairCount;
 
@@ -1137,7 +1170,7 @@
         showToast(msg.error);
         return;
       }
-      cachedPrices = msg.prices || {};
+      cachedCoinData = msg.coins || {};
       priceLoaded = true;
 
       const banner = document.getElementById('price-source-banner');
@@ -1152,12 +1185,15 @@
 
     function triggerScan() {
       const cryptoVar = document.getElementById('price-var-crypto').value.trim() || '{crypto}';
-      const priceVar = document.getElementById('price-var-price').value.trim() || '{price}';
+      const priceVar  = document.getElementById('price-var-price').value.trim()  || '{price}';
+      const changeVar = document.getElementById('price-var-change').value.trim() || '{change}';
+      const volumeVar = document.getElementById('price-var-volume').value.trim() || '{volume}';
+      const mcapVar   = document.getElementById('price-var-mcap').value.trim()   || '{mcap}';
       priceLoaded = false;
       priceCards = null;
       cardCoinAssignments = [];
       renderPriceScanResults(false);
-      parent.postMessage({ pluginMessage: { type: 'scan-price-layers', cryptoVar, priceVar } }, '*');
+      parent.postMessage({ pluginMessage: { type: 'scan-price-layers', cryptoVar, priceVar, changeVar, volumeVar, mcapVar } }, '*');
     }
 
     // ── Price tab event listeners ──────────────────────────────────────────
@@ -1174,13 +1210,12 @@
       if (!priceCards || !priceLoaded) return;
       const replacements = [];
       for (let i = 0; i < priceCards.length; i++) {
-        const coin = cardCoinAssignments[i] ?? selectedCoins[0];
+        const coin = cardCoinAssignments[i] ?? getPriceCoins()[0] ?? 'ETH';
+        const coinData = cachedCoinData[coin] ?? null;
         for (const m of priceCards[i].matches) {
           replacements.push({
             nodeId: m.nodeId,
-            newText: m.role === 'crypto'
-              ? coin
-              : formatPrice(cachedPrices[coin] ?? 0),
+            newText: m.role === 'crypto' ? coin : valueForRole(m.role, coinData),
           });
         }
       }

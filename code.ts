@@ -73,6 +73,9 @@ type ScanPriceLayersMessage = {
   type: 'scan-price-layers';
   cryptoVar: string;
   priceVar: string;
+  changeVar: string;
+  volumeVar: string;
+  mcapVar: string;
 };
 type ApplyPriceMessage = {
   type: 'apply-price';
@@ -80,9 +83,17 @@ type ApplyPriceMessage = {
 };
 
 type ApiKeysToUIMessage = { type: 'api-keys'; coingeckoKey: string; cmcKey: string };
+
+type CoinPriceData = {
+  price: number | null;
+  change: number | null;
+  volume: number | null;
+  mcap: number | null;
+};
+
 type PricesResultMessage = {
   type: 'prices-result';
-  prices: Record<string, number | null>;
+  coins: Record<string, CoinPriceData>;
   error?: string;
   source?: 'coingecko' | 'coinmarketcap';
 };
@@ -91,7 +102,7 @@ type PriceLayerMatch = {
   nodeId: string;
   layerName: string;
   currentText: string;
-  role: 'crypto' | 'price';
+  role: 'crypto' | 'price' | 'change' | 'volume' | 'mcap';
 };
 
 type PriceCard = {
@@ -218,12 +229,18 @@ async function fetchPrices(symbols: string[]): Promise<void> {
         { headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' } },
       );
       if (resp.ok) {
-        const json = await resp.json();
-        const prices: Record<string, number | null> = {};
+        const json = (await resp.json()) as any;
+        const coins: Record<string, CoinPriceData> = {};
         for (const sym of symbols) {
-          prices[sym] = (json as any).data?.[sym]?.quote?.USD?.price ?? null;
+          const q = json.data?.[sym]?.quote?.USD ?? {};
+          coins[sym] = {
+            price: q.price ?? null,
+            change: q.percent_change_24h ?? null,
+            volume: q.volume_24h ?? null,
+            mcap: q.market_cap ?? null,
+          };
         }
-        figma.ui.postMessage({ type: 'prices-result', prices, source: 'coinmarketcap' } satisfies PricesResultMessage);
+        figma.ui.postMessage({ type: 'prices-result', coins, source: 'coinmarketcap' } satisfies PricesResultMessage);
         return;
       }
     } catch (_err) {
@@ -235,47 +252,74 @@ async function fetchPrices(symbols: string[]): Promise<void> {
     const ids = symbols.map(s => COINGECKO_ID[s] ?? s.toLowerCase()).join(',');
     const keyParam = typeof cgKey === 'string' && cgKey ? `&x_cg_demo_api_key=${cgKey}` : '';
     const resp = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd${keyParam}`,
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd` +
+      `&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true${keyParam}`,
     );
     if (!resp.ok) {
       figma.ui.postMessage({
         type: 'prices-result',
-        prices: {},
+        coins: {},
         error: `API error: ${resp.status}`,
         source: 'coingecko',
       } satisfies PricesResultMessage);
       return;
     }
-    const json = await resp.json();
-    const prices: Record<string, number | null> = {};
+    const json = (await resp.json()) as any;
+    const coins: Record<string, CoinPriceData> = {};
     for (const sym of symbols) {
       const id = COINGECKO_ID[sym] ?? sym.toLowerCase();
-      prices[sym] = (json as any)[id]?.usd ?? null;
+      const d = json[id] ?? {};
+      coins[sym] = {
+        price: d.usd ?? null,
+        change: d.usd_24h_change ?? null,
+        volume: d.usd_24h_vol ?? null,
+        mcap: d.usd_market_cap ?? null,
+      };
     }
-    figma.ui.postMessage({ type: 'prices-result', prices, source: 'coingecko' } satisfies PricesResultMessage);
+    figma.ui.postMessage({ type: 'prices-result', coins, source: 'coingecko' } satisfies PricesResultMessage);
   } catch (_err) {
     figma.ui.postMessage({
       type: 'prices-result',
-      prices: {},
+      coins: {},
       error: 'Network error',
       source: 'coingecko',
     } satisfies PricesResultMessage);
   }
 }
 
-function matchesInNode(node: SceneNode, cryptoVar: string, priceVar: string): PriceLayerMatch[] {
+function matchesInNode(
+  node: SceneNode,
+  cryptoVar: string,
+  priceVar: string,
+  changeVar: string,
+  volumeVar: string,
+  mcapVar: string,
+): PriceLayerMatch[] {
   const result: PriceLayerMatch[] = [];
   for (const t of collectTextTargets([node])) {
-    if (t.name === cryptoVar || t.characters === cryptoVar) {
-      result.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'crypto' });
-    } else if (t.name === priceVar || t.characters === priceVar) {
-      result.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'price' });
-    }
+    const name = t.name;
+    const chars = t.characters;
+    if (name === cryptoVar || chars === cryptoVar)
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'crypto' });
+    else if (name === priceVar || chars === priceVar)
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'price' });
+    else if (name === changeVar || chars === changeVar)
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'change' });
+    else if (name === volumeVar || chars === volumeVar)
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'volume' });
+    else if (name === mcapVar || chars === mcapVar)
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'mcap' });
   }
   return result;
 }
 
-function scanPriceLayers(cryptoVar: string, priceVar: string): void {
+function scanPriceLayers(
+  cryptoVar: string,
+  priceVar: string,
+  changeVar: string,
+  volumeVar: string,
+  mcapVar: string,
+): void {
   if (!isApplySupportedEditor()) {
     figma.ui.postMessage({ type: 'price-layer-scan', cards: [] } satisfies PriceLayerScanResult);
     return;
@@ -289,9 +333,11 @@ function scanPriceLayers(cryptoVar: string, priceVar: string): void {
 
   const cards: PriceCard[] = [];
 
+  const vars: [string, string, string, string, string] = [cryptoVar, priceVar, changeVar, volumeVar, mcapVar];
+
   if (sel.length > 1) {
     for (const node of sel) {
-      const matches = matchesInNode(node, cryptoVar, priceVar);
+      const matches = matchesInNode(node, ...vars);
       if (matches.length > 0) cards.push({ cardName: node.name, matches });
     }
   } else {
@@ -299,7 +345,7 @@ function scanPriceLayers(cryptoVar: string, priceVar: string): void {
     if ('children' in root) {
       const childCards: PriceCard[] = [];
       for (const child of (root as SceneNode & ChildrenMixin).children) {
-        const matches = matchesInNode(child, cryptoVar, priceVar);
+        const matches = matchesInNode(child, ...vars);
         if (matches.length > 0) childCards.push({ cardName: child.name, matches });
       }
       if (childCards.length > 0) {
@@ -307,7 +353,7 @@ function scanPriceLayers(cryptoVar: string, priceVar: string): void {
         return;
       }
     }
-    const matches = matchesInNode(root, cryptoVar, priceVar);
+    const matches = matchesInNode(root, ...vars);
     if (matches.length > 0) cards.push({ cardName: root.name, matches });
   }
 
@@ -650,12 +696,12 @@ figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
       await fetchPrices(msg.symbols);
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
-      figma.ui.postMessage({ type: 'prices-result', prices: {}, error: err } satisfies PricesResultMessage);
+      figma.ui.postMessage({ type: 'prices-result', coins: {}, error: err } satisfies PricesResultMessage);
     }
     return;
   }
   if (msg.type === 'scan-price-layers') {
-    scanPriceLayers(msg.cryptoVar, msg.priceVar);
+    scanPriceLayers(msg.cryptoVar, msg.priceVar, msg.changeVar, msg.volumeVar, msg.mcapVar);
     return;
   }
   if (msg.type === 'apply-price') {
