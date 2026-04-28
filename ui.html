@@ -20,25 +20,21 @@
       margin: 0;
       padding: 0;
       width: 100%;
-      height: 100%;
+      height: auto;
       font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 11px;
       color: rgba(0, 0, 0, 0.8);
       background: #fff;
-      overflow: hidden;
+      overflow: visible;
     }
     .root {
-      position: relative;
       width: 100%;
-      height: 100%;
-      min-height: 0;
-      padding-bottom: 0;
+      display: flex;
+      flex-direction: column;
     }
     .top-bar {
-      position: absolute;
+      position: sticky;
       top: 0;
-      left: 0;
-      right: 0;
       height: 44px;
       background: #2c2c2c;
       display: flex;
@@ -46,6 +42,7 @@
       justify-content: space-between;
       padding: 0 8px 0 10px;
       z-index: 10;
+      flex-shrink: 0;
     }
     .segment {
       display: flex;
@@ -87,29 +84,21 @@
       background: rgba(255, 255, 255, 0.08);
     }
     .content-below-header {
-      padding-top: 44px;
-      position: relative;
       width: 100%;
-      height: calc(100% - 44px);
-      min-height: 0;
+      flex: 1;
     }
     .view-hidden {
       display: none !important;
     }
     .preview {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 0;
-      min-height: 121px;
-      max-height: 148px;
+      width: 100%;
+      min-height: 100px;
       background: #f7f7f7;
       border-bottom: 1px solid rgba(0, 0, 0, 0.06);
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 10px 16px;
-      overflow: hidden;
+      padding: 16px;
     }
     .preview-inner {
       width: 100%;
@@ -143,15 +132,12 @@
       width: 100%;
     }
     .view-wallet {
-      position: relative;
+      display: flex;
+      flex-direction: column;
       width: 100%;
-      height: 100%;
-      min-height: 0;
     }
     .network-block {
-      position: absolute;
-      left: 14px;
-      top: 152px;
+      padding: 14px 14px 0;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -187,9 +173,7 @@
       border-color: #18a0fb;
     }
     .truncate-row {
-      position: absolute;
-      left: 14px;
-      top: 228px;
+      margin: 10px 14px 0;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -217,32 +201,17 @@
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.3 6.1 4.8 8.6 9.7 3.7'/%3E%3C/svg%3E");
     }
     .desc {
-      position: absolute;
-      left: 14px;
-      right: 20px;
-      top: 284px;
+      margin: 8px 14px 0;
       font-size: 11px;
       line-height: 16px;
       color: rgba(0, 0, 0, 0.3);
       letter-spacing: 0.055px;
-      margin: 0;
     }
     .hint-meta {
       display: none;
-      position: absolute;
-      left: 14px;
-      right: 14px;
-      top: 4px;
-      font-size: 10px;
-      line-height: 14px;
-      color: rgba(0, 0, 0, 0.45);
-      margin: 0;
     }
     .actions {
-      position: absolute;
-      left: 14px;
-      right: 14px;
-      bottom: 34px;
+      padding: 12px 14px 14px;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
@@ -277,8 +246,6 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100%;
-      min-height: 0;
       padding: 32px 20px;
       text-align: center;
     }
@@ -301,9 +268,6 @@
     }
     .view-settings {
       padding: 16px 14px 24px;
-      height: 100%;
-      min-height: 0;
-      overflow-y: auto;
     }
     .settings-title {
       font-size: 12px;
@@ -376,6 +340,7 @@
       to { transform: rotate(360deg); }
     }
     /* Price tab */
+    .view-price { display: flex; flex-direction: column; }
     .price-section { padding: 12px 14px 0; }
     .price-var-desc {
       font-size: 11px;
@@ -527,11 +492,8 @@
       transform: translateX(-50%) translateY(0);
     }
     .footer {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
       height: 34px;
+      flex-shrink: 0;
       border-top: 1px solid rgba(0, 0, 0, 0.06);
       background: #fff;
       display: flex;
@@ -812,8 +774,8 @@
     }
 
     function requestPluginResize() {
-      const mode = settingsOpen ? 'settings' : segmentTab;
-      const height = UI_HEIGHTS[mode] || UI_HEIGHTS.wallet;
+      // Use actual rendered content height so every tab and state fits naturally.
+      const height = document.documentElement.scrollHeight;
       parent.postMessage(
         { pluginMessage: { type: 'resize-ui', height: height } },
         '*',
@@ -1150,6 +1112,7 @@
       list.classList.add('view-hidden');
       list.innerHTML = '';
       applyBtn.disabled = !(previewMode && priceCards.length > 0);
+      requestPluginResize();
     }
 
     function fetchPrices() {
@@ -1182,6 +1145,7 @@
 
       assignCoinsToCards();
       renderPriceScanResults(true);
+      requestPluginResize();
     }
 
     function triggerScan() {
