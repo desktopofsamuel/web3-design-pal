@@ -7,6 +7,59 @@ const ethLine = /^0x[a-f0-9]{40}$/;
 /** Base58 alphabet (no 0 O I l) */
 const solPattern = /^[1-9A-HJ-NP-Za-km-z]{44}$/;
 
+// ─── Price tab mock data (real CoinGecko response, 2024-04) ──────────────────
+const MOCK_COINS: Record<string, { price: number; change: number; volume: number; mcap: number }> =
+  {
+    ETH: {
+      price: 2279.4,
+      change: -1.7090294198921991,
+      volume: 13619093866.416811,
+      mcap: 275124785372.0594,
+    },
+    BTC: {
+      price: 76511,
+      change: -1.6369118028497176,
+      volume: 33915634645.395718,
+      mcap: 1532118888510.001,
+    },
+    SOL: {
+      price: 83.71,
+      change: -1.6606195765535383,
+      volume: 2891995107.941362,
+      mcap: 48236128508.15029,
+    },
+    XRP: {
+      price: 1.39,
+      change: -1.9317122850842732,
+      volume: 1849986074.768185,
+      mcap: 85569581780.77618,
+    },
+    BNB: {
+      price: 622.29,
+      change: -0.759411015015047,
+      volume: 846504885.6417747,
+      mcap: 83868252775.19609,
+    },
+  };
+
+/** Reusable mock cards — two token cards each with a {crypto} + {price} layer. */
+const MOCK_CARDS = [
+  {
+    cardName: 'Token Card 1',
+    matches: [
+      { nodeId: 'n1', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+      { nodeId: 'n2', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'Token Card 2',
+    matches: [
+      { nodeId: 'n3', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+      { nodeId: 'n4', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+];
+
 async function firstPreviewText(page: import('@playwright/test').Page): Promise<string> {
   const line = page.locator('#preview-inner .preview-line').first();
   return (await line.textContent()) ?? '';
@@ -26,57 +79,112 @@ function postSelectionContext(
  * figma.clientStorage. In the browser harness, emulate the main thread and
  * optionally mirror to localStorage so tests can reset state.
  */
-async function installFigmaStorageMock(page: import('@playwright/test').Page): Promise<void> {
-  await page.addInitScript((cfg: { key: string; buy: string; profile: string }) => {
-    window.addEventListener('message', (ev: MessageEvent) => {
-      const pm = (ev.data as { pluginMessage?: Record<string, unknown> } | undefined)
-        ?.pluginMessage;
-      if (!pm || typeof pm !== 'object') return;
-      const type = pm.type as string;
-      if (type === 'get-truncate-rules') {
-        let start = 6;
-        let end = 4;
-        try {
-          const raw = localStorage.getItem(cfg.key);
-          if (raw) {
-            const p = JSON.parse(raw) as { start?: unknown; end?: unknown };
-            start = Math.max(0, Math.min(64, Math.floor(Number(p.start) || 6)));
-            end = Math.max(0, Math.min(64, Math.floor(Number(p.end) || 4)));
+async function installFigmaStorageMock(
+  page: import('@playwright/test').Page,
+  coins: Record<string, { price: number; change: number; volume: number; mcap: number }> = {},
+): Promise<void> {
+  await page.addInitScript(
+    (cfg: {
+      key: string;
+      buy: string;
+      profile: string;
+      coins: Record<string, { price: number; change: number; volume: number; mcap: number }>;
+    }) => {
+      window.addEventListener('message', (ev: MessageEvent) => {
+        const pm = (ev.data as { pluginMessage?: Record<string, unknown> } | undefined)
+          ?.pluginMessage;
+        if (!pm || typeof pm !== 'object') return;
+        const type = pm.type as string;
+
+        if (type === 'get-truncate-rules') {
+          let start = 6;
+          let end = 4;
+          try {
+            const raw = localStorage.getItem(cfg.key);
+            if (raw) {
+              const p = JSON.parse(raw) as { start?: unknown; end?: unknown };
+              start = Math.max(0, Math.min(64, Math.floor(Number(p.start) || 6)));
+              end = Math.max(0, Math.min(64, Math.floor(Number(p.end) || 4)));
+            }
+          } catch {
+            /* use defaults */
           }
-        } catch {
-          /* use defaults */
+          window.postMessage({ pluginMessage: { type: 'truncate-rules', start, end } }, '*');
         }
-        window.postMessage({ pluginMessage: { type: 'truncate-rules', start, end } }, '*');
-      }
-      if (type === 'get-footer-links') {
-        window.postMessage(
-          {
-            pluginMessage: {
-              type: 'footer-links',
-              buyMeCoffeeUrl: cfg.buy,
-              profileUrl: cfg.profile,
+
+        if (type === 'get-footer-links') {
+          window.postMessage(
+            {
+              pluginMessage: {
+                type: 'footer-links',
+                buyMeCoffeeUrl: cfg.buy,
+                profileUrl: cfg.profile,
+              },
             },
-          },
-          '*',
-        );
-      }
-      if (type === 'save-truncate-rules') {
-        const start = Math.max(0, Math.min(64, Math.floor(Number(pm.start) || 6)));
-        const end = Math.max(0, Math.min(64, Math.floor(Number(pm.end) || 4)));
-        try {
-          localStorage.setItem(cfg.key, JSON.stringify({ start, end }));
-        } catch {
-          /* ignore */
+            '*',
+          );
         }
-        window.postMessage({ pluginMessage: { type: 'truncate-rules', start, end } }, '*');
-      }
-    });
-  }, { key: STORAGE_KEY, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL });
+
+        if (type === 'save-truncate-rules') {
+          const start = Math.max(0, Math.min(64, Math.floor(Number(pm.start) || 6)));
+          const end = Math.max(0, Math.min(64, Math.floor(Number(pm.end) || 4)));
+          try {
+            localStorage.setItem(cfg.key, JSON.stringify({ start, end }));
+          } catch {
+            /* ignore */
+          }
+          window.postMessage({ pluginMessage: { type: 'truncate-rules', start, end } }, '*');
+        }
+
+        if (type === 'get-api-keys') {
+          let cgKey = '';
+          let cmcKey = '';
+          try {
+            const raw = localStorage.getItem('web3dpal_api_keys');
+            if (raw) {
+              const p = JSON.parse(raw) as { cgKey?: string; cmcKey?: string };
+              cgKey = typeof p.cgKey === 'string' ? p.cgKey : '';
+              cmcKey = typeof p.cmcKey === 'string' ? p.cmcKey : '';
+            }
+          } catch {
+            /* ignore */
+          }
+          window.postMessage(
+            { pluginMessage: { type: 'api-keys', coingeckoKey: cgKey, cmcKey } },
+            '*',
+          );
+        }
+
+        if (type === 'save-api-keys') {
+          try {
+            localStorage.setItem(
+              'web3dpal_api_keys',
+              JSON.stringify({ cgKey: pm.coingeckoKey ?? '', cmcKey: pm.cmcKey ?? '' }),
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // Respond to fetch-prices with the baked-in mock coin data.
+        if (type === 'fetch-prices') {
+          window.postMessage(
+            { pluginMessage: { type: 'prices-result', source: 'coingecko', coins: cfg.coins } },
+            '*',
+          );
+        }
+
+        // resize-ui is a no-op in browser tests (iframe resize not available).
+        if (type === 'resize-ui') { /* no-op */ }
+      });
+    },
+    { key: STORAGE_KEY, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL, coins },
+  );
 }
 
 test.describe('Web3 Design Pal UI', () => {
   test.beforeEach(async ({ page }) => {
-    await installFigmaStorageMock(page);
+    await installFigmaStorageMock(page, MOCK_COINS);
     await page.goto('/ui.html');
     await page.evaluate((key) => {
       localStorage.removeItem(key);
@@ -177,7 +285,7 @@ test.describe('Web3 Design Pal UI', () => {
     await expect(page.getByLabel('Characters at end')).toHaveValue('4');
     await page.getByLabel('Characters at start').fill('4');
     await page.getByLabel('Characters at end').fill('2');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('#settings-save').click();
     await expect(page.locator('#view-wallet')).toBeVisible();
     await expect(page.locator('#view-settings')).toBeHidden();
 
@@ -295,7 +403,7 @@ test.describe('Web3 Design Pal UI', () => {
 
 test.describe('Truncate settings page', () => {
   test.beforeEach(async ({ page }) => {
-    await installFigmaStorageMock(page);
+    await installFigmaStorageMock(page, MOCK_COINS);
     await page.goto('/ui.html');
     await page.evaluate((key) => {
       localStorage.removeItem(key);
@@ -318,7 +426,7 @@ test.describe('Truncate settings page', () => {
     await expect(page.getByLabel('Characters at start')).toHaveValue('6');
     await expect(page.getByLabel('Characters at end')).toHaveValue('4');
 
-    await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
+    await expect(page.locator('#settings-save')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Back' })).toBeVisible();
   });
 
@@ -341,7 +449,7 @@ test.describe('Truncate settings page', () => {
     await page.getByRole('button', { name: 'Settings' }).click();
     await page.getByLabel('Characters at start').fill('8');
     await page.getByLabel('Characters at end').fill('10');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('#settings-save').click();
 
     const msgs = await page.evaluate(() => {
       const w = window as unknown as { __saveRulesMsgs: Record<string, unknown>[] };
@@ -374,7 +482,7 @@ test.describe('Truncate settings page', () => {
     await page.getByRole('button', { name: 'Settings' }).click();
     await page.getByLabel('Characters at start').fill('200');
     await page.getByLabel('Characters at end').fill('-3');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('#settings-save').click();
 
     const last = await page.evaluate(() => {
       const w = window as unknown as { __saveRulesMsgs: Record<string, unknown>[] };
@@ -395,5 +503,261 @@ test.describe('Truncate settings page', () => {
 
     await page.getByRole('button', { name: 'Settings' }).click();
     await expect(page.getByLabel('Characters at start')).toHaveValue('6');
+  });
+});
+
+// ─── Helpers shared by price tests ───────────────────────────────────────────
+
+/** Navigate to the Price tab. */
+async function openPriceTab(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByRole('tab', { name: 'Price' }).click();
+}
+
+/**
+ * Simulate the main thread replying to a scan-price-layers call with the given
+ * cards, then wait for the summary element to become visible.
+ */
+async function postScanResult(
+  page: import('@playwright/test').Page,
+  cards: typeof MOCK_CARDS,
+): Promise<void> {
+  await postSelectionContext(page, { type: 'price-layer-scan', cards });
+  await page.locator('#price-scan-summary').waitFor({ state: 'visible' });
+}
+
+/**
+ * Full happy-path setup: navigate to Price tab, post a scan result, wait for
+ * fetch-prices to be answered by the mock (which immediately returns MOCK_COINS),
+ * and wait for the apply button to become enabled.
+ */
+async function setupPriceTabWithData(
+  page: import('@playwright/test').Page,
+  cards: typeof MOCK_CARDS = MOCK_CARDS,
+): Promise<void> {
+  await openPriceTab(page);
+  await postScanResult(page, cards);
+  // The mock auto-responds to fetch-prices; wait for apply button to enable.
+  await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+}
+
+// ─── Price tab tests ──────────────────────────────────────────────────────────
+
+test.describe('Price tab', () => {
+  test.beforeEach(async ({ page }) => {
+    await installFigmaStorageMock(page, MOCK_COINS);
+    await page.goto('/ui.html');
+    await page.evaluate((key) => {
+      localStorage.removeItem(key);
+    }, STORAGE_KEY);
+    await page.reload();
+  });
+
+  test('Price tab is shown and Wallet tab is hidden when Price tab is clicked', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await expect(page.locator('#view-price')).toBeVisible();
+    await expect(page.locator('#view-wallet')).toHaveClass(/view-hidden/);
+  });
+
+  test('default coin textarea contains expected coins', async ({ page }) => {
+    await openPriceTab(page);
+    const value = await page.locator('#price-coin-input').inputValue();
+    const coins = value.split(',').map((s) => s.trim());
+    expect(coins).toContain('ETH');
+    expect(coins).toContain('BTC');
+    expect(coins).toContain('SOL');
+    expect(coins.length).toBeGreaterThanOrEqual(30);
+  });
+
+  test('before any scan, Update text is disabled and no-selection hint is shown', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+    await expect(page.locator('#price-no-selection')).toBeVisible();
+  });
+
+  test('Scan button posts scan-price-layers with correct default variable names', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+
+    // Set up listener first (returns void — no deadlock).
+    await page.evaluate(() => {
+      const w = window as unknown as { __scanCapture: Record<string, unknown> | null };
+      w.__scanCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'scan-price-layers') {
+          w.__scanCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.getByRole('button', { name: 'Scan' }).click();
+
+    // Poll for the captured value (click triggers the postMessage synchronously).
+    const msg = await page.evaluate(
+      () => (window as unknown as { __scanCapture: Record<string, unknown> | null }).__scanCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    expect(msg!.type).toBe('scan-price-layers');
+    expect(msg!.cryptoVar).toBe('{crypto}');
+    expect(msg!.priceVar).toBe('{price}');
+    expect(msg!.changeVar).toBe('{change}');
+    expect(msg!.volumeVar).toBe('{volume}');
+    expect(msg!.mcapVar).toBe('{mcap}');
+  });
+
+  test('price-layer-scan with 2 cards shows pair count in summary', async ({ page }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS);
+    await expect(page.locator('#price-scan-summary')).toContainText('2 pairs');
+  });
+
+  test('price-layer-scan with empty cards shows "No matching layer names" message', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postSelectionContext(page, { type: 'price-layer-scan', cards: [] });
+    await expect(page.locator('#price-no-selection')).toContainText(
+      'No matching layer names found in selection.',
+    );
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  test('after prices load, summary says Ready to apply and Update text is enabled', async ({
+    page,
+  }) => {
+    await setupPriceTabWithData(page);
+    await expect(page.locator('#price-scan-summary')).toContainText('Ready to apply');
+    await expect(page.locator('#price-apply-btn')).toBeEnabled();
+  });
+
+  test('source banner appears and names CoinGecko after prices load', async ({ page }) => {
+    await setupPriceTabWithData(page);
+    await expect(page.locator('#price-source-banner')).toBeVisible();
+    await expect(page.locator('#price-source-banner')).toContainText('CoinGecko');
+  });
+
+  test('Update text posts apply-price with a replacements array', async ({ page }) => {
+    await setupPriceTabWithData(page);
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    expect(msg!.type).toBe('apply-price');
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    expect(Array.isArray(replacements)).toBe(true);
+    expect(replacements.length).toBeGreaterThan(0);
+    for (const r of replacements) {
+      expect(typeof r.nodeId).toBe('string');
+      expect(typeof r.newText).toBe('string');
+      expect(r.newText.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('prices-result with an error field shows a toast', async ({ page }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS);
+    // Override the auto-response by posting an error result directly.
+    await postSelectionContext(page, {
+      type: 'prices-result',
+      error: 'Rate limit reached',
+      coins: {},
+    });
+    await expect(page.locator('#toast')).toContainText('Rate limit reached');
+  });
+});
+
+// ─── Settings — Price API Keys + Price formatting ─────────────────────────────
+
+test.describe('Settings — Price API Keys and Price formatting', () => {
+  test.beforeEach(async ({ page }) => {
+    await installFigmaStorageMock(page, MOCK_COINS);
+    await page.goto('/ui.html');
+    await page.evaluate((key) => {
+      localStorage.removeItem(key);
+      localStorage.removeItem('web3dpal_api_keys');
+    }, STORAGE_KEY);
+    await page.reload();
+    await page.getByRole('button', { name: 'Settings' }).click();
+  });
+
+  test('Price API Keys section is visible with both key inputs', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Price API Keys' })).toBeVisible();
+    await expect(page.locator('#settings-cg-key')).toBeVisible();
+    await expect(page.locator('#settings-cmc-key')).toBeVisible();
+  });
+
+  test('Price formatting section is visible with correct defaults', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Price formatting' })).toBeVisible();
+    await expect(page.locator('#price-show-symbol')).toBeChecked();
+    await expect(page.locator('#price-show-commas')).toBeChecked();
+    await expect(page.locator('#price-decimals')).toHaveValue('2');
+  });
+
+  test('Save API Keys posts save-api-keys with entered keys', async ({ page }) => {
+    await page.evaluate(() => {
+      const w = window as unknown as { __apiKeyCapture: Record<string, unknown> | null };
+      w.__apiKeyCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'save-api-keys') {
+          w.__apiKeyCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#settings-cg-key').fill('cg-test-key');
+    await page.locator('#settings-cmc-key').fill('cmc-test-key');
+    await page.getByRole('button', { name: 'Save API Keys' }).click();
+
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __apiKeyCapture: Record<string, unknown> | null }).__apiKeyCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    expect(msg!.type).toBe('save-api-keys');
+    expect(msg!.coingeckoKey).toBe('cg-test-key');
+    expect(msg!.cmcKey).toBe('cmc-test-key');
+  });
+
+  test('API key inputs are pre-filled when keys are stored', async ({ page }) => {
+    // Store keys via the mock storage key before reloading.
+    await page.evaluate(() => {
+      localStorage.setItem(
+        'web3dpal_api_keys',
+        JSON.stringify({ cgKey: 'stored-cg-key', cmcKey: 'stored-cmc-key' }),
+      );
+    });
+    await page.reload();
+    await page.getByRole('button', { name: 'Settings' }).click();
+
+    await expect(page.locator('#settings-cg-key')).toHaveValue('stored-cg-key');
+    await expect(page.locator('#settings-cmc-key')).toHaveValue('stored-cmc-key');
   });
 });

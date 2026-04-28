@@ -25,7 +25,7 @@
       font-size: 11px;
       color: rgba(0, 0, 0, 0.8);
       background: #fff;
-      overflow: visible;
+      overflow: hidden;
     }
     .root {
       width: 100%;
@@ -1322,10 +1322,12 @@
         return;
       }
       if (msg.type === 'price-layer-scan') {
-        priceCards = (msg.cards && msg.cards.length > 0) ? msg.cards : null;
+        // Preserve empty array so renderPriceScanResults can distinguish
+        // "scanned, no results" ([] ≠ null) from "never scanned" (null).
+        priceCards = Array.isArray(msg.cards) ? msg.cards : null;
         cardCoinAssignments = [];
         renderPriceScanResults(false);
-        if (priceCards) fetchPrices();
+        if (priceCards && priceCards.length > 0) fetchPrices();
         return;
       }
       if (msg.type === 'prices-result') {
