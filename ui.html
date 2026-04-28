@@ -461,6 +461,50 @@
       border-top: 1px solid rgba(0,0,0,0.06);
     }
     .price-card-header:first-child { border-top: none; padding-top: 0; }
+    #price-coin-input {
+      width: 100%;
+      padding: 6px 8px;
+      font: inherit;
+      font-size: 11px;
+      font-family: ui-monospace, 'IBM Plex Mono', Menlo, monospace;
+      border: 1px solid rgba(0,0,0,0.15);
+      border-radius: 2px;
+      resize: vertical;
+      line-height: 16px;
+      color: rgba(0,0,0,0.8);
+      margin-top: 4px;
+    }
+    #price-coin-input::placeholder { color: rgba(0,0,0,0.3); }
+    .price-scan-summary {
+      font-size: 11px;
+      color: rgba(0,0,0,0.55);
+      padding: 6px 0 2px;
+    }
+    .price-card-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+      font-size: 11px;
+      gap: 6px;
+    }
+    .price-card-row:last-child { border-bottom: none; }
+    .price-card-row-name {
+      color: rgba(0,0,0,0.5);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    .price-card-row-right {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .price-card-row-coin { font-weight: 600; color: rgba(0,0,0,0.85); }
+    .price-card-row-price { color: rgba(0,0,0,0.5); }
     .toast {
       position: fixed;
       left: 50%;
@@ -560,8 +604,8 @@
           </div>
         </div>
         <div class="price-section">
-          <p class="label-muted">Coin</p>
-          <div class="chip-row" id="price-coin-chips"></div>
+          <p class="label-muted">Coins (comma-separated, one picked at random per card)</p>
+          <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP</textarea>
         </div>
         <div class="price-section">
           <p class="label-muted">Format</p>
@@ -574,6 +618,7 @@
         <div class="price-section">
           <p class="label-muted">Layers found in selection</p>
           <div id="price-no-selection" class="desc">No frame or group selected in Figma.</div>
+          <div id="price-scan-summary" class="view-hidden"></div>
           <div id="price-layer-list" class="view-hidden"></div>
         </div>
         <div class="actions">
@@ -644,9 +689,7 @@
     let segmentTab = 'wallet';
     let settingsOpen = false;
 
-    // Price tab state
-    let selectedCoins = ['ETH', 'BTC', 'SOL', 'XRP'];
-    const priceCoins = ['ETH', 'BTC', 'SOL', 'XRP'];
+    // Price tab state — coins read live from #price-coin-input
     /** @type {Record<string, number | null>} */
     let cachedPrices = {};
     let coingeckoKey = '';
@@ -1015,109 +1058,55 @@
       return sym ? `$${num}` : num;
     }
 
-    function syncPriceCoinChips() {
-      const row = document.getElementById('price-coin-chips');
-      row.innerHTML = '';
-      for (const coin of priceCoins) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'chip' + (selectedCoins.includes(coin) ? ' selected' : '');
-        b.textContent = coin;
-        b.addEventListener('click', () => {
-          if (selectedCoins.includes(coin)) {
-            if (selectedCoins.length > 1) selectedCoins = selectedCoins.filter(c => c !== coin);
-          } else {
-            selectedCoins = [...selectedCoins, coin];
-          }
-          syncPriceCoinChips();
-          if (priceLoaded) { assignCoinsToCards(); renderPriceScanResults(true); }
-        });
-        row.appendChild(b);
-      }
+    function getPriceCoins() {
+      const raw = document.getElementById('price-coin-input').value;
+      const coins = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0);
+      return coins.length > 0 ? coins : ['ETH'];
     }
 
     function assignCoinsToCards() {
       if (!priceCards) return;
+      const coins = getPriceCoins();
       cardCoinAssignments = priceCards.map(() =>
-        selectedCoins[Math.floor(Math.random() * selectedCoins.length)],
+        coins[Math.floor(Math.random() * coins.length)],
       );
     }
 
     function renderPriceScanResults(previewMode) {
       const noSel = document.getElementById('price-no-selection');
+      const summary = document.getElementById('price-scan-summary');
       const list = document.getElementById('price-layer-list');
       const applyBtn = document.getElementById('price-apply-btn');
 
       if (!priceCards || priceCards.length === 0) {
-        const msg = priceCards !== null
+        noSel.textContent = priceCards !== null
           ? 'No matching layer names found in selection.'
           : 'No frame or group selected in Figma.';
-        noSel.textContent = msg;
         noSel.classList.remove('view-hidden');
+        summary.classList.add('view-hidden');
         list.classList.add('view-hidden');
         applyBtn.disabled = true;
         return;
       }
 
+      // Count proper pairs (cards that have both a crypto and a price match)
+      const pairCount = priceCards.filter(c =>
+        c.matches.some(m => m.role === 'crypto') && c.matches.some(m => m.role === 'price'),
+      ).length;
+      const partialCount = priceCards.length - pairCount;
+
+      let summaryText = `${pairCount} pair${pairCount !== 1 ? 's' : ''} of crypto placeholder found.`;
+      if (partialCount > 0) summaryText += ` (${partialCount} with partial match)`;
+      if (!previewMode) summaryText += ' Fetching prices…';
+      else summaryText += ' Ready to apply.';
+
       noSel.classList.add('view-hidden');
-      list.classList.remove('view-hidden');
+      summary.textContent = summaryText;
+      summary.className = 'price-scan-summary';
+      summary.classList.remove('view-hidden');
+
+      list.classList.add('view-hidden');
       list.innerHTML = '';
-
-      for (let i = 0; i < priceCards.length; i++) {
-        const card = priceCards[i];
-        const coin = cardCoinAssignments[i] ?? selectedCoins[0];
-
-        if (priceCards.length > 1) {
-          const header = document.createElement('div');
-          header.className = 'price-card-header';
-          header.textContent = card.cardName;
-          list.appendChild(header);
-        }
-
-        for (const m of card.matches) {
-          const item = document.createElement('div');
-          item.className = 'price-layer-item';
-
-          const left = document.createElement('div');
-          left.className = 'price-layer-left';
-
-          const tag = document.createElement('span');
-          tag.className = 'price-layer-name-tag';
-          tag.textContent = m.layerName;
-          left.appendChild(tag);
-
-          if (m.currentText) {
-            const old = document.createElement('span');
-            old.className = 'price-layer-old';
-            old.textContent = m.currentText;
-            left.appendChild(old);
-          }
-
-          item.appendChild(left);
-
-          if (previewMode) {
-            const arrow = document.createElement('span');
-            arrow.className = 'price-layer-arrow';
-            arrow.textContent = '→';
-            item.appendChild(arrow);
-
-            const newVal = document.createElement('span');
-            newVal.className = 'price-layer-new';
-            const price = cachedPrices[coin];
-            if (m.role === 'crypto') {
-              newVal.textContent = coin;
-            } else if (price !== null && price !== undefined) {
-              newVal.textContent = formatPrice(price);
-            } else {
-              newVal.textContent = '—';
-            }
-            item.appendChild(newVal);
-          }
-
-          list.appendChild(item);
-        }
-      }
-
       applyBtn.disabled = !(previewMode && priceCards.length > 0);
     }
 
@@ -1127,7 +1116,7 @@
       const btn = document.getElementById('price-scan-btn');
       btn.textContent = 'Fetching…';
       btn.disabled = true;
-      parent.postMessage({ pluginMessage: { type: 'fetch-prices', symbols: priceCoins } }, '*');
+      parent.postMessage({ pluginMessage: { type: 'fetch-prices', symbols: getPriceCoins() } }, '*');
     }
 
     function handlePricesResult(msg) {
@@ -1339,7 +1328,6 @@
 
     address = generateAddress(selectedNetwork);
     syncNetworkChips();
-    syncPriceCoinChips();
     syncPrimaryActionLabel();
     updateRootViews();
     requestTruncateRulesFromMain();
