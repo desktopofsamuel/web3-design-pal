@@ -34,7 +34,8 @@ const DEFAULT_TRUNCATE_END = 4;
 
 /** Persisted via figma.clientStorage — see https://developers.figma.com/docs/plugins/api/figma-clientStorage/ */
 const TRUNCATE_RULES_STORAGE_KEY = 'web3dpal_truncate_rules';
-const CMC_API_KEY_STORAGE_KEY = 'web3dpal_cmc_api_key';
+const COINGECKO_KEY_STORAGE_KEY = 'web3dpal_coingecko_key';
+const CMC_KEY_STORAGE_KEY = 'web3dpal_cmc_key';
 
 type TruncateRulesPayload = { start: number; end: number };
 
@@ -53,8 +54,9 @@ type TruncateRulesToUIMessage = {
 
 type CancelMessage = { type: 'cancel' };
 
-type GetCmcApiKeyMessage  = { type: 'get-cmc-api-key' };
-type SaveCmcApiKeyMessage = { type: 'save-cmc-api-key'; key: string };
+type GetApiKeysMessage = { type: 'get-api-keys' };
+type SaveApiKeysMessage = { type: 'save-api-keys'; coingeckoKey: string; cmcKey: string };
+type FetchPricesMessage = { type: 'fetch-prices'; symbols: string[] };
 type ScanPriceLayersMessage = {
   type: 'scan-price-layers';
   cryptoVar: string;
@@ -65,7 +67,13 @@ type ApplyPriceMessage = {
   replacements: Array<{ nodeId: string; newText: string }>;
 };
 
-type CmcApiKeyToUIMessage = { type: 'cmc-api-key'; key: string };
+type ApiKeysToUIMessage = { type: 'api-keys'; coingeckoKey: string; cmcKey: string };
+type PricesResultMessage = {
+  type: 'prices-result';
+  prices: Record<string, number | null>;
+  error?: string;
+  source?: 'coingecko' | 'coinmarketcap';
+};
 
 type PriceLayerMatch = {
   nodeId: string;
@@ -74,10 +82,14 @@ type PriceLayerMatch = {
   role: 'crypto' | 'price';
 };
 
+type PriceCard = {
+  cardName: string;
+  matches: PriceLayerMatch[];
+};
+
 type PriceLayerScanResult = {
   type: 'price-layer-scan';
-  groupName: string | null;
-  matches: PriceLayerMatch[];
+  cards: PriceCard[];
 };
 
 type PluginMessageFromUI =
@@ -85,8 +97,9 @@ type PluginMessageFromUI =
   | CancelMessage
   | GetTruncateRulesMessage
   | SaveTruncateRulesMessage
-  | GetCmcApiKeyMessage
-  | SaveCmcApiKeyMessage
+  | GetApiKeysMessage
+  | SaveApiKeysMessage
+  | FetchPricesMessage
   | ScanPriceLayersMessage
   | ApplyPriceMessage;
 
@@ -100,6 +113,13 @@ const APPENDABLE_TYPES: SceneNode['type'][] = [
 ];
 
 const DEFAULT_FONT: FontName = { family: 'Inter', style: 'Regular' };
+
+const COINGECKO_ID: Record<string, string> = {
+  ETH: 'ethereum',
+  BTC: 'bitcoin',
+  SOL: 'solana',
+  XRP: 'ripple',
+};
 
 function normalizeStoredTruncateRules(raw: unknown): TruncateRulesPayload {
   if (!raw || typeof raw !== 'object') {
@@ -125,38 +145,125 @@ async function pushTruncateRulesToUI(): Promise<void> {
   figma.ui.postMessage({ type: 'truncate-rules', ...rules } satisfies TruncateRulesToUIMessage);
 }
 
-async function pushCmcApiKeyToUI(): Promise<void> {
-  const stored = await figma.clientStorage.getAsync(CMC_API_KEY_STORAGE_KEY);
-  const key = typeof stored === 'string' ? stored : '';
-  figma.ui.postMessage({ type: 'cmc-api-key', key } satisfies CmcApiKeyToUIMessage);
+async function pushApiKeysToUI(): Promise<void> {
+  const [cg, cmc] = await Promise.all([
+    figma.clientStorage.getAsync(COINGECKO_KEY_STORAGE_KEY),
+    figma.clientStorage.getAsync(CMC_KEY_STORAGE_KEY),
+  ]);
+  figma.ui.postMessage({
+    type: 'api-keys',
+    coingeckoKey: typeof cg === 'string' ? cg : '',
+    cmcKey: typeof cmc === 'string' ? cmc : '',
+  } satisfies ApiKeysToUIMessage);
+}
+
+async function fetchPrices(symbols: string[]): Promise<void> {
+  const [cmcKey, cgKey] = await Promise.all([
+    figma.clientStorage.getAsync(CMC_KEY_STORAGE_KEY),
+    figma.clientStorage.getAsync(COINGECKO_KEY_STORAGE_KEY),
+  ]);
+
+  if (typeof cmcKey === 'string' && cmcKey) {
+    try {
+      const resp = await fetch(
+        `https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=${symbols.join(',')}`,
+        { headers: { 'X-CMC_PRO_API_KEY': cmcKey, Accept: 'application/json' } },
+      );
+      if (resp.ok) {
+        const json = await resp.json();
+        const prices: Record<string, number | null> = {};
+        for (const sym of symbols) {
+          prices[sym] = (json as any).data?.[sym]?.quote?.USD?.price ?? null;
+        }
+        figma.ui.postMessage({ type: 'prices-result', prices, source: 'coinmarketcap' } satisfies PricesResultMessage);
+        return;
+      }
+    } catch (_err) {
+      // fall through to CoinGecko
+    }
+  }
+
+  try {
+    const ids = symbols.map(s => COINGECKO_ID[s] ?? s.toLowerCase()).join(',');
+    const keyParam = typeof cgKey === 'string' && cgKey ? `&x_cg_demo_api_key=${cgKey}` : '';
+    const resp = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd${keyParam}`,
+    );
+    if (!resp.ok) {
+      figma.ui.postMessage({
+        type: 'prices-result',
+        prices: {},
+        error: `API error: ${resp.status}`,
+        source: 'coingecko',
+      } satisfies PricesResultMessage);
+      return;
+    }
+    const json = await resp.json();
+    const prices: Record<string, number | null> = {};
+    for (const sym of symbols) {
+      const id = COINGECKO_ID[sym] ?? sym.toLowerCase();
+      prices[sym] = (json as any)[id]?.usd ?? null;
+    }
+    figma.ui.postMessage({ type: 'prices-result', prices, source: 'coingecko' } satisfies PricesResultMessage);
+  } catch (_err) {
+    figma.ui.postMessage({
+      type: 'prices-result',
+      prices: {},
+      error: 'Network error',
+      source: 'coingecko',
+    } satisfies PricesResultMessage);
+  }
+}
+
+function matchesInNode(node: SceneNode, cryptoVar: string, priceVar: string): PriceLayerMatch[] {
+  const result: PriceLayerMatch[] = [];
+  for (const t of collectTextTargets([node])) {
+    if (t.name === cryptoVar || t.characters === cryptoVar) {
+      result.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'crypto' });
+    } else if (t.name === priceVar || t.characters === priceVar) {
+      result.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'price' });
+    }
+  }
+  return result;
 }
 
 function scanPriceLayers(cryptoVar: string, priceVar: string): void {
   if (!isApplySupportedEditor()) {
-    figma.ui.postMessage({ type: 'price-layer-scan', groupName: null, matches: [] } satisfies PriceLayerScanResult);
+    figma.ui.postMessage({ type: 'price-layer-scan', cards: [] } satisfies PriceLayerScanResult);
     return;
   }
 
   const sel = figma.currentPage.selection;
   if (sel.length === 0) {
-    figma.ui.postMessage({ type: 'price-layer-scan', groupName: null, matches: [] } satisfies PriceLayerScanResult);
+    figma.ui.postMessage({ type: 'price-layer-scan', cards: [] } satisfies PriceLayerScanResult);
     return;
   }
 
-  const root = sel[0];
-  const groupName = root.name;
-  const matches: PriceLayerMatch[] = [];
+  const cards: PriceCard[] = [];
 
-  const texts = collectTextTargets([root]);
-  for (const t of texts) {
-    if (t.name === cryptoVar) {
-      matches.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'crypto' });
-    } else if (t.name === priceVar) {
-      matches.push({ nodeId: t.id, layerName: t.name, currentText: t.characters, role: 'price' });
+  if (sel.length > 1) {
+    for (const node of sel) {
+      const matches = matchesInNode(node, cryptoVar, priceVar);
+      if (matches.length > 0) cards.push({ cardName: node.name, matches });
     }
+  } else {
+    const root = sel[0];
+    if ('children' in root) {
+      const childCards: PriceCard[] = [];
+      for (const child of (root as SceneNode & ChildrenMixin).children) {
+        const matches = matchesInNode(child, cryptoVar, priceVar);
+        if (matches.length > 0) childCards.push({ cardName: child.name, matches });
+      }
+      if (childCards.length > 0) {
+        figma.ui.postMessage({ type: 'price-layer-scan', cards: childCards } satisfies PriceLayerScanResult);
+        return;
+      }
+    }
+    const matches = matchesInNode(root, cryptoVar, priceVar);
+    if (matches.length > 0) cards.push({ cardName: root.name, matches });
   }
 
-  figma.ui.postMessage({ type: 'price-layer-scan', groupName, matches } satisfies PriceLayerScanResult);
+  figma.ui.postMessage({ type: 'price-layer-scan', cards } satisfies PriceLayerScanResult);
 }
 
 async function applyPriceReplacements(
@@ -164,7 +271,7 @@ async function applyPriceReplacements(
 ): Promise<void> {
   let applied = 0;
   for (const { nodeId, newText } of replacements) {
-    const node = figma.getNodeById(nodeId);
+    const node = await figma.getNodeByIdAsync(nodeId);
     if (node && node.type === 'TEXT') {
       await setTextCharacters(node, newText);
       applied++;
@@ -467,14 +574,27 @@ figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
     }
     return;
   }
-  if (msg.type === 'get-cmc-api-key') {
-    await pushCmcApiKeyToUI();
+  if (msg.type === 'get-api-keys') {
+    await pushApiKeysToUI();
     return;
   }
-  if (msg.type === 'save-cmc-api-key') {
-    const key = typeof msg.key === 'string' ? msg.key.trim() : '';
-    await figma.clientStorage.setAsync(CMC_API_KEY_STORAGE_KEY, key);
-    figma.ui.postMessage({ type: 'cmc-api-key', key } satisfies CmcApiKeyToUIMessage);
+  if (msg.type === 'save-api-keys') {
+    const cgKey = typeof msg.coingeckoKey === 'string' ? msg.coingeckoKey.trim() : '';
+    const cmcKey = typeof msg.cmcKey === 'string' ? msg.cmcKey.trim() : '';
+    await Promise.all([
+      figma.clientStorage.setAsync(COINGECKO_KEY_STORAGE_KEY, cgKey),
+      figma.clientStorage.setAsync(CMC_KEY_STORAGE_KEY, cmcKey),
+    ]);
+    figma.ui.postMessage({ type: 'api-keys', coingeckoKey: cgKey, cmcKey } satisfies ApiKeysToUIMessage);
+    return;
+  }
+  if (msg.type === 'fetch-prices') {
+    try {
+      await fetchPrices(msg.symbols);
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      figma.ui.postMessage({ type: 'prices-result', prices: {}, error: err } satisfies PricesResultMessage);
+    }
     return;
   }
   if (msg.type === 'scan-price-layers') {
@@ -500,4 +620,4 @@ if (isApplySupportedEditor()) {
 pushSelectionContext();
 
 void pushTruncateRulesToUI();
-void pushCmcApiKeyToUI();
+void pushApiKeysToUI();
