@@ -1078,11 +1078,16 @@
     function assignCoinsToCards() {
       if (!priceCards) return;
       const coins = getPriceCoins();
-      // Build a pool large enough for all cards, refilling with a fresh shuffle
-      // each time we exhaust the list — guarantees no duplicates within each round.
+      // Build a pool for cards that need a random coin (no auto-detected ticker).
       const pool = [];
       while (pool.length < priceCards.length) pool.push(...shuffled(coins));
-      cardCoinAssignments = priceCards.map((_, i) => pool[i]);
+      let poolIdx = 0;
+      cardCoinAssignments = priceCards.map((card) => {
+        // If this card has a literal ticker (auto-detected), use it directly.
+        const literal = card.matches.find(m => m.role === 'crypto' && m.isLiteral);
+        if (literal) return literal.currentText;
+        return pool[poolIdx++];
+      });
     }
 
     function renderPriceScanResults(previewMode) {
@@ -1102,15 +1107,20 @@
         return;
       }
 
-      // A "pair" = card has {crypto} + at least one data field (price/change/volume/mcap)
+      // A "pair" = card has a crypto anchor + at least one data field
       const DATA_ROLES = ['price', 'change', 'volume', 'mcap'];
       const pairCount = priceCards.filter(c =>
         c.matches.some(m => m.role === 'crypto') &&
         c.matches.some(m => DATA_ROLES.includes(m.role)),
       ).length;
       const partialCount = priceCards.length - pairCount;
+      const autoDetected = priceCards.filter(c =>
+        c.matches.some(m => m.role === 'crypto' && m.isLiteral),
+      ).length;
 
-      let summaryText = `${pairCount} pair${pairCount !== 1 ? 's' : ''} of crypto placeholder found.`;
+      let summaryText = autoDetected > 0
+        ? `${pairCount} card${pairCount !== 1 ? 's' : ''} with detected ticker found.`
+        : `${pairCount} pair${pairCount !== 1 ? 's' : ''} of crypto placeholder found.`;
       if (partialCount > 0) summaryText += ` (${partialCount} with partial match)`;
       if (!previewMode) summaryText += ' Fetching prices…';
       else summaryText += ' Ready to apply.';
@@ -1132,7 +1142,16 @@
       const btn = document.getElementById('price-scan-btn');
       btn.textContent = 'Fetching…';
       btn.disabled = true;
-      parent.postMessage({ pluginMessage: { type: 'fetch-prices', symbols: getPriceCoins() } }, '*');
+      // Always include auto-detected tickers so their prices are fetched even
+      // if the user's coin pool doesn't list them.
+      const poolCoins = getPriceCoins();
+      const detectedTickers = priceCards
+        ? [...new Set(priceCards.flatMap(c =>
+            c.matches.filter(m => m.role === 'crypto' && m.isLiteral).map(m => m.currentText)
+          ))]
+        : [];
+      const allSymbols = [...new Set([...poolCoins, ...detectedTickers])];
+      parent.postMessage({ pluginMessage: { type: 'fetch-prices', symbols: allSymbols } }, '*');
     }
 
     function handlePricesResult(msg) {
@@ -1189,6 +1208,9 @@
         const coin = cardCoinAssignments[i] ?? getPriceCoins()[0] ?? 'ETH';
         const coinData = cachedCoinData[coin] ?? null;
         for (const m of priceCards[i].matches) {
+          // Skip literal tickers — they're already the correct coin symbol;
+          // only the surrounding data layers ({price}, {change}, etc.) get updated.
+          if (m.role === 'crypto' && m.isLiteral) continue;
           replacements.push({
             nodeId: m.nodeId,
             newText: m.role === 'crypto' ? coin : valueForRole(m.role, coinData),

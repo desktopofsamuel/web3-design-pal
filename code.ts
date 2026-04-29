@@ -103,6 +103,11 @@ type PriceLayerMatch = {
   layerName: string;
   currentText: string;
   role: 'crypto' | 'price' | 'change' | 'volume' | 'mcap';
+  /**
+   * When true the text is a known ticker that was auto-detected (e.g. "BTC").
+   * The apply step skips replacing this node — only data layers get updated.
+   */
+  isLiteral?: boolean;
 };
 
 type PriceCard = {
@@ -296,6 +301,7 @@ function matchesInNode(
   mcapVar: string,
 ): PriceLayerMatch[] {
   const result: PriceLayerMatch[] = [];
+  const knownTickers = new Set(Object.keys(COINGECKO_ID));
   for (const t of collectTextTargets([node])) {
     const name = t.name;
     const chars = t.characters;
@@ -309,6 +315,12 @@ function matchesInNode(
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'volume' });
     else if (name === mcapVar || chars === mcapVar)
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'mcap' });
+    else if (knownTickers.has(chars)) {
+      // Auto-detect: text content is a known ticker symbol (e.g. "BTC", "ETH").
+      // Mark as literal so the apply step preserves the text and only updates
+      // adjacent data layers ({price}, {change}, etc.) for that coin.
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'crypto', isLiteral: true });
+    }
   }
   return result;
 }

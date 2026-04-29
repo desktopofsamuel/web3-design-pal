@@ -60,6 +60,30 @@ const MOCK_CARDS = [
   },
 ];
 
+/**
+ * Auto-detect mock cards: ticker text is already set ("BTC", "ETH") rather
+ * than a placeholder. The `isLiteral` flag means the ticker layer is NOT
+ * replaced — only sibling data layers ({price}, {change}) are updated.
+ */
+const MOCK_CARDS_AUTO_DETECT = [
+  {
+    cardName: 'BTC Row',
+    matches: [
+      { nodeId: 'a1', layerName: 'ticker', currentText: 'BTC', role: 'crypto', isLiteral: true },
+      { nodeId: 'a2', layerName: '{price}', currentText: '{price}', role: 'price' },
+      { nodeId: 'a3', layerName: '{change}', currentText: '{change}', role: 'change' },
+    ],
+  },
+  {
+    cardName: 'ETH Row',
+    matches: [
+      { nodeId: 'b1', layerName: 'ticker', currentText: 'ETH', role: 'crypto', isLiteral: true },
+      { nodeId: 'b2', layerName: '{price}', currentText: '{price}', role: 'price' },
+      { nodeId: 'b3', layerName: '{change}', currentText: '{change}', role: 'change' },
+    ],
+  },
+];
+
 async function firstPreviewText(page: import('@playwright/test').Page): Promise<string> {
   const line = page.locator('#preview-inner .preview-line').first();
   return (await line.textContent()) ?? '';
@@ -754,6 +778,90 @@ test.describe('Price tab', () => {
     // price role → fallback '—' because no data for FAKECOIN
     const priceReplacement = replacements.find((r) => r.nodeId === 'n2' || r.nodeId === 'n4');
     expect(priceReplacement?.newText).toBe('—');
+  });
+
+  // ── Auto-detect ticker tests ────────────────────────────────────────────────
+
+  test('auto-detect: summary says "cards with detected ticker" when isLiteral cards found', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS_AUTO_DETECT);
+    await expect(page.locator('#price-scan-summary')).toContainText('detected ticker');
+  });
+
+  test('auto-detect: literal ticker node is NOT in apply-price replacements', async ({ page }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS_AUTO_DETECT);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+
+    // Ticker nodes (a1 = BTC, b1 = ETH) must NOT appear — they are preserved as-is
+    expect(replacements.find((r) => r.nodeId === 'a1')).toBeUndefined();
+    expect(replacements.find((r) => r.nodeId === 'b1')).toBeUndefined();
+
+    // Data layers must appear
+    expect(replacements.find((r) => r.nodeId === 'a2')).toBeDefined(); // BTC price
+    expect(replacements.find((r) => r.nodeId === 'b2')).toBeDefined(); // ETH price
+  });
+
+  test('auto-detect: each card uses its own detected ticker for the price fetch', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS_AUTO_DETECT);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+
+    // BTC card price (a2) should use BTC data from MOCK_COINS ($76,511)
+    const btcPrice = replacements.find((r) => r.nodeId === 'a2');
+    expect(btcPrice?.newText).toContain('76'); // BTC is ~$76k
+
+    // ETH card price (b2) should use ETH data ($2,279)
+    const ethPrice = replacements.find((r) => r.nodeId === 'b2');
+    expect(ethPrice?.newText).toContain('2'); // ETH is ~$2k range
   });
 });
 
