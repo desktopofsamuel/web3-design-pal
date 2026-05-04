@@ -76,6 +76,8 @@ type ScanPriceLayersMessage = {
   changeVar: string;
   volumeVar: string;
   mcapVar: string;
+  /** Symbols the user entered in the coin textarea — used for literal-ticker auto-detection. */
+  knownTickers: string[];
 };
 type ApplyPriceMessage = {
   type: 'apply-price';
@@ -108,6 +110,18 @@ type PriceLayerMatch = {
    * The apply step skips replacing this node — only data layers get updated.
    */
   isLiteral?: boolean;
+  /**
+   * Set when the variable token appears inside a longer string in the text content
+   * (e.g. content "A${price}"). The apply step replaces only this token within
+   * currentText rather than overwriting the whole string.
+   */
+  matchedVar?: string;
+  /**
+   * Set when the variable token is embedded in the layer NAME (e.g. name "A${price}").
+   * Value is the prefix/suffix text around the token (e.g. "A$").
+   * The apply step prepends this to the formatted value.
+   */
+  namePrefix?: string;
 };
 
 type PriceCard = {
@@ -144,38 +158,6 @@ const APPENDABLE_TYPES: SceneNode['type'][] = [
 
 const DEFAULT_FONT: FontName = { family: 'Inter', style: 'Regular' };
 
-const COINGECKO_ID: Record<string, string> = {
-  ETH: 'ethereum',
-  BTC: 'bitcoin',
-  SOL: 'solana',
-  XRP: 'ripple',
-  BNB: 'binancecoin',
-  ADA: 'cardano',
-  AVAX: 'avalanche-2',
-  DOT: 'polkadot',
-  LINK: 'chainlink',
-  MATIC: 'matic-network',
-  UNI: 'uniswap',
-  LTC: 'litecoin',
-  BCH: 'bitcoin-cash',
-  ATOM: 'cosmos',
-  FIL: 'filecoin',
-  NEAR: 'near',
-  APT: 'aptos',
-  ARB: 'arbitrum',
-  OP: 'optimism',
-  SUI: 'sui',
-  TRX: 'tron',
-  DOGE: 'dogecoin',
-  SHIB: 'shiba-inu',
-  PEPE: 'pepe',
-  WIF: 'dogwifcoin',
-  TON: 'the-open-network',
-  INJ: 'injective-protocol',
-  SEI: 'sei-network',
-  TIA: 'celestia',
-  JUP: 'jupiter-exchange-solana',
-};
 
 function normalizeStoredTruncateRules(raw: unknown): TruncateRulesPayload {
   if (!raw || typeof raw !== 'object') {
@@ -254,10 +236,9 @@ async function fetchPrices(symbols: string[]): Promise<void> {
   }
 
   try {
-    const ids = symbols.map(s => COINGECKO_ID[s] ?? s.toLowerCase()).join(',');
     const keyParam = typeof cgKey === 'string' && cgKey ? `&x_cg_demo_api_key=${cgKey}` : '';
     const resp = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd` +
+      `https://api.coingecko.com/api/v3/simple/price?symbols=${symbols.join(',')}&vs_currencies=usd` +
       `&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true${keyParam}`,
     );
     if (!resp.ok) {
@@ -272,8 +253,8 @@ async function fetchPrices(symbols: string[]): Promise<void> {
     const json = (await resp.json()) as any;
     const coins: Record<string, CoinPriceData> = {};
     for (const sym of symbols) {
-      const id = COINGECKO_ID[sym] ?? sym.toLowerCase();
-      const d = json[id] ?? {};
+      // CoinGecko returns keys as lowercase symbols
+      const d = json[sym.toLowerCase()] ?? {};
       coins[sym] = {
         price: d.usd ?? null,
         change: d.usd_24h_change ?? null,
@@ -299,9 +280,9 @@ function matchesInNode(
   changeVar: string,
   volumeVar: string,
   mcapVar: string,
+  knownTickerSet: ReadonlySet<string>,
 ): PriceLayerMatch[] {
   const result: PriceLayerMatch[] = [];
-  const knownTickers = new Set(Object.keys(COINGECKO_ID));
   for (const t of collectTextTargets([node])) {
     const name = t.name;
     const chars = t.characters;
@@ -315,7 +296,29 @@ function matchesInNode(
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'volume' });
     else if (name === mcapVar || chars === mcapVar)
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'mcap' });
-    else if (knownTickers.has(chars)) {
+    else if (chars.includes(priceVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'price', matchedVar: priceVar });
+    else if (chars.includes(changeVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'change', matchedVar: changeVar });
+    else if (chars.includes(volumeVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'volume', matchedVar: volumeVar });
+    else if (chars.includes(mcapVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'mcap', matchedVar: mcapVar });
+    else if (chars.includes(cryptoVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'crypto', matchedVar: cryptoVar });
+    // Layer NAME contains the token (e.g. name="A${price}") — covers the case where
+    // the content has already been replaced with a real value like "A$23.00".
+    else if (name.includes(priceVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'price', namePrefix: name.replace(priceVar, '') });
+    else if (name.includes(changeVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'change', namePrefix: name.replace(changeVar, '') });
+    else if (name.includes(volumeVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'volume', namePrefix: name.replace(volumeVar, '') });
+    else if (name.includes(mcapVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'mcap', namePrefix: name.replace(mcapVar, '') });
+    else if (name.includes(cryptoVar))
+      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'crypto', namePrefix: name.replace(cryptoVar, '') });
+    else if (knownTickerSet.has(chars)) {
       // Auto-detect: text content is a known ticker symbol (e.g. "BTC", "ETH").
       // Mark as literal so the apply step preserves the text and only updates
       // adjacent data layers ({price}, {change}, etc.) for that coin.
@@ -331,6 +334,7 @@ function scanPriceLayers(
   changeVar: string,
   volumeVar: string,
   mcapVar: string,
+  knownTickers: string[],
 ): void {
   if (!isApplySupportedEditor()) {
     figma.ui.postMessage({ type: 'price-layer-scan', cards: [] } satisfies PriceLayerScanResult);
@@ -344,8 +348,10 @@ function scanPriceLayers(
   }
 
   const cards: PriceCard[] = [];
-
-  const vars: [string, string, string, string, string] = [cryptoVar, priceVar, changeVar, volumeVar, mcapVar];
+  const tickerSet = new Set(knownTickers);
+  const vars: [string, string, string, string, string, ReadonlySet<string>] = [
+    cryptoVar, priceVar, changeVar, volumeVar, mcapVar, tickerSet,
+  ];
 
   if (sel.length > 1) {
     for (const node of sel) {
@@ -360,7 +366,15 @@ function scanPriceLayers(
         const matches = matchesInNode(child, ...vars);
         if (matches.length > 0) childCards.push({ cardName: child.name, matches });
       }
-      if (childCards.length > 0) {
+      // Only split by children when at least one child is a full card (crypto + data).
+      // If all children are partial (e.g. selected node is a Row whose direct children
+      // are individual text layers), fall through and match the root as one card instead.
+      const dataRoles = new Set(['price', 'change', 'volume', 'mcap']);
+      const hasFullChildCard = childCards.some(c =>
+        c.matches.some(m => m.role === 'crypto') &&
+        c.matches.some(m => dataRoles.has(m.role))
+      );
+      if (hasFullChildCard) {
         figma.ui.postMessage({ type: 'price-layer-scan', cards: childCards } satisfies PriceLayerScanResult);
         return;
       }
@@ -713,7 +727,7 @@ figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
     return;
   }
   if (msg.type === 'scan-price-layers') {
-    scanPriceLayers(msg.cryptoVar, msg.priceVar, msg.changeVar, msg.volumeVar, msg.mcapVar);
+    scanPriceLayers(msg.cryptoVar, msg.priceVar, msg.changeVar, msg.volumeVar, msg.mcapVar, msg.knownTickers);
     return;
   }
   if (msg.type === 'apply-price') {

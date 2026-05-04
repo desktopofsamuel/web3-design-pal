@@ -317,6 +317,13 @@
     .btn-secondary:hover {
       background: rgba(0, 0, 0, 0.1);
     }
+    .btn-secondary.needs-refresh {
+      background: #18a0fb;
+      color: #fff;
+    }
+    .btn-secondary.needs-refresh:hover {
+      background: #0d8ce8;
+    }
     #settings-save {
       display: inline-flex;
       align-items: center;
@@ -389,6 +396,11 @@
       color: #18a0fb;
       cursor: pointer;
       text-decoration: underline;
+    }
+    .price-timestamp {
+      margin: 4px 14px 0;
+      font-size: 10px;
+      color: rgba(0,0,0,0.4);
     }
     .price-layer-item {
       display: flex;
@@ -562,6 +574,7 @@
       </div>
       <div class="view-price view-hidden" id="view-price" role="tabpanel">
         <div class="price-banner view-hidden" id="price-source-banner"></div>
+        <div class="price-timestamp view-hidden" id="price-timestamp"></div>
         <div class="price-section">
           <p class="price-var-desc">Name your Figma layers <code class="var-token">{crypto}</code> ticker, <code class="var-token">{price}</code> USD price, <code class="var-token">{change}</code> 24h % change, <code class="var-token">{volume}</code> 24h volume, or <code class="var-token">{mcap}</code> market cap. Scan finds all matching layer names in your selection.</p>
         </div>
@@ -573,7 +586,7 @@
         <input type="hidden" id="price-var-mcap" value="{mcap}" />
         <div class="price-section">
           <p class="label-muted">Coins (comma-separated, one picked at random per card)</p>
-          <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP</textarea>
+          <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP, DAI, USDC, USDT, WBTC, AAVE, MKR, LDO, CRV</textarea>
         </div>
         <div class="price-section">
           <p class="label-muted">Layers found in selection</p>
@@ -583,6 +596,7 @@
         </div>
         <div class="actions">
           <button type="button" class="btn btn-gen" id="price-scan-btn">Scan</button>
+          <button type="button" class="btn btn-secondary" id="price-refresh-btn">Refresh</button>
           <button type="button" class="btn btn-apply" id="price-apply-btn" disabled>Update text</button>
         </div>
       </div>
@@ -663,6 +677,8 @@
     let segmentTab = 'wallet';
     let settingsOpen = false;
 
+    const PRICE_CACHE_KEY = 'web3dpal_price_cache';
+
     // Price tab state — coins read live from #price-coin-input
     /** @type {Record<string, {price:number|null, change:number|null, volume:number|null, mcap:number|null}>} */
     let cachedCoinData = {};
@@ -670,6 +686,8 @@
     let cmcKey = '';
     let priceLoaded = false;
     let priceFetching = false;
+    /** @type {number|null} */
+    let priceTimestamp = null;
     /** @type {Array<{cardName:string, matches:Array<{nodeId:string,layerName:string,currentText:string,role:string}>}> | null} */
     let priceCards = null;
     /** @type {string[]} */
@@ -1020,6 +1038,67 @@
       }
     }
 
+    // ── Price cache helpers ────────────────────────────────────────────────
+
+    function formatTimeAgo(ts) {
+      const secs = Math.floor((Date.now() - ts) / 1000);
+      if (secs < 60) return 'just now';
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return `${mins} min ago`;
+      const hrs = Math.floor(mins / 60);
+      return `${hrs} hr${hrs !== 1 ? 's' : ''} ago`;
+    }
+
+    function savePriceCache(coins, source) {
+      try {
+        localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify({ coins, source, timestamp: Date.now() }));
+      } catch (_) {}
+    }
+
+    function loadPriceCache() {
+      try {
+        const raw = localStorage.getItem(PRICE_CACHE_KEY);
+        if (!raw) return;
+        const p = JSON.parse(raw);
+        if (p && p.coins && typeof p.coins === 'object') {
+          cachedCoinData = p.coins;
+          priceLoaded = true;
+          priceTimestamp = typeof p.timestamp === 'number' ? p.timestamp : null;
+          const banner = document.getElementById('price-source-banner');
+          if (banner && p.source) {
+            banner.textContent = `Prices via ${p.source === 'coinmarketcap' ? 'CoinMarketCap' : 'CoinGecko'}.`;
+            banner.classList.remove('view-hidden');
+          }
+          updateRefreshButtonHint();
+        }
+      } catch (_) {}
+    }
+
+    function updateTimestampEl() {
+      const el = document.getElementById('price-timestamp');
+      if (!el) return;
+      if (priceLoaded && priceTimestamp) {
+        el.textContent = 'Prices updated ' + formatTimeAgo(priceTimestamp);
+        el.classList.remove('view-hidden');
+      } else {
+        el.classList.add('view-hidden');
+      }
+    }
+
+    function updateRefreshButtonHint() {
+      const btn = document.getElementById('price-refresh-btn');
+      if (!btn || priceFetching) return;
+      const poolCoins = getPriceCoins();
+      const detectedTickers = priceCards
+        ? [...new Set(priceCards.flatMap(c =>
+            c.matches.filter(m => m.role === 'crypto' && m.isLiteral).map(m => m.currentText)
+          ))]
+        : [];
+      const allNeeded = [...new Set([...poolCoins, ...detectedTickers])];
+      const hasMissing = allNeeded.some(c => !cachedCoinData[c]);
+      btn.classList.toggle('needs-refresh', hasMissing);
+    }
+
     // ── Price tab functions ────────────────────────────────────────────────
 
     function formatPrice(raw) {
@@ -1107,41 +1186,81 @@
         return;
       }
 
-      // A "pair" = card has a crypto anchor + at least one data field
       const DATA_ROLES = ['price', 'change', 'volume', 'mcap'];
-      const pairCount = priceCards.filter(c =>
-        c.matches.some(m => m.role === 'crypto') &&
-        c.matches.some(m => DATA_ROLES.includes(m.role)),
-      ).length;
-      const partialCount = priceCards.length - pairCount;
-      const autoDetected = priceCards.filter(c =>
-        c.matches.some(m => m.role === 'crypto' && m.isLiteral),
-      ).length;
 
-      let summaryText = autoDetected > 0
-        ? `${pairCount} card${pairCount !== 1 ? 's' : ''} with detected ticker found.`
-        : `${pairCount} pair${pairCount !== 1 ? 's' : ''} of crypto placeholder found.`;
-      if (partialCount > 0) summaryText += ` (${partialCount} with partial match)`;
-      if (!previewMode) summaryText += ' Fetching prices…';
-      else summaryText += ' Ready to apply.';
+      // Cards with {crypto} + at least one data layer → full update
+      const fullCards = priceCards.filter(c =>
+        c.matches.some(m => m.role === 'crypto') &&
+        c.matches.some(m => DATA_ROLES.includes(m.role))
+      );
+      // Cards with data layers but no {crypto} → price updates, coin from pool
+      const missingCryptoCards = priceCards.filter(c =>
+        !c.matches.some(m => m.role === 'crypto') &&
+        c.matches.some(m => DATA_ROLES.includes(m.role))
+      );
+      // Cards with {crypto} only → coin name updates, no price layers
+      const missingDataCards = priceCards.filter(c =>
+        c.matches.some(m => m.role === 'crypto') &&
+        !c.matches.some(m => DATA_ROLES.includes(m.role))
+      );
+
+      // Literal tickers detected inside full cards (e.g. a layer already named "ETH")
+      const literalTickers = [...new Set(
+        fullCards.flatMap(c =>
+          c.matches.filter(m => m.role === 'crypto' && m.isLiteral).map(m => m.currentText)
+        )
+      )];
+
+      const lines = [];
+
+      if (fullCards.length > 0) {
+        if (literalTickers.length > 0) {
+          lines.push(`${literalTickers.join(', ')} detected — price will be inserted in ${fullCards.length} card${fullCards.length !== 1 ? 's' : ''}.`);
+        } else {
+          lines.push(`${fullCards.length} card${fullCards.length !== 1 ? 's' : ''} found — coin from pool, price will be inserted.`);
+        }
+      }
+
+      if (missingCryptoCards.length > 0) {
+        lines.push(`${missingCryptoCards.length} card${missingCryptoCards.length !== 1 ? 's' : ''}: has price layers but no {crypto} — skipped.`);
+      }
+
+      if (missingDataCards.length > 0) {
+        lines.push(`${missingDataCards.length} card${missingDataCards.length !== 1 ? 's' : ''}: has {crypto} but no price layers — skipped.`);
+      }
+
+      if (fullCards.length > 0) {
+        if (!previewMode) {
+          lines.push('Click Refresh to load prices.');
+        } else {
+          lines.push('Prices loaded. Ready to update.');
+        }
+      }
 
       noSel.classList.add('view-hidden');
-      summary.textContent = summaryText;
+      summary.innerHTML = '';
+      lines.forEach((line, i) => {
+        if (i > 0) summary.appendChild(document.createElement('br'));
+        summary.appendChild(document.createTextNode(line));
+      });
       summary.className = 'price-scan-summary';
       summary.classList.remove('view-hidden');
 
       list.classList.add('view-hidden');
       list.innerHTML = '';
-      applyBtn.disabled = !(previewMode && priceCards.length > 0);
+      applyBtn.disabled = !(previewMode && fullCards.length > 0);
+      updateTimestampEl();
+      updateRefreshButtonHint();
       requestPluginResize();
     }
 
     function fetchPrices() {
       if (priceFetching) return;
       priceFetching = true;
-      const btn = document.getElementById('price-scan-btn');
+      const btn = document.getElementById('price-refresh-btn');
       btn.textContent = 'Fetching…';
       btn.disabled = true;
+      btn.classList.remove('needs-refresh');
       // Always include auto-detected tickers so their prices are fetched even
       // if the user's coin pool doesn't list them.
       const poolCoins = getPriceCoins();
@@ -1156,8 +1275,8 @@
 
     function handlePricesResult(msg) {
       priceFetching = false;
-      const btn = document.getElementById('price-scan-btn');
-      btn.textContent = 'Scan';
+      const btn = document.getElementById('price-refresh-btn');
+      btn.textContent = 'Refresh';
       btn.disabled = false;
 
       if (msg.error) {
@@ -1166,6 +1285,8 @@
       }
       cachedCoinData = msg.coins || {};
       priceLoaded = true;
+      priceTimestamp = Date.now();
+      savePriceCache(cachedCoinData, msg.source);
 
       const banner = document.getElementById('price-source-banner');
       if (msg.source) {
@@ -1174,6 +1295,8 @@
       }
 
       assignCoinsToCards();
+      updateTimestampEl();
+      updateRefreshButtonHint();
       renderPriceScanResults(true);
       requestPluginResize();
     }
@@ -1184,11 +1307,11 @@
       const changeVar = document.getElementById('price-var-change').value.trim() || '{change}';
       const volumeVar = document.getElementById('price-var-volume').value.trim() || '{volume}';
       const mcapVar   = document.getElementById('price-var-mcap').value.trim()   || '{mcap}';
-      priceLoaded = false;
+      // Keep priceLoaded — cached prices remain valid across scans.
       priceCards = null;
       cardCoinAssignments = [];
-      renderPriceScanResults(false);
-      parent.postMessage({ pluginMessage: { type: 'scan-price-layers', cryptoVar, priceVar, changeVar, volumeVar, mcapVar } }, '*');
+      renderPriceScanResults(priceLoaded);
+      parent.postMessage({ pluginMessage: { type: 'scan-price-layers', cryptoVar, priceVar, changeVar, volumeVar, mcapVar, knownTickers: getPriceCoins() } }, '*');
     }
 
     // ── Price tab event listeners ──────────────────────────────────────────
@@ -1200,21 +1323,40 @@
     });
 
     document.getElementById('price-scan-btn').addEventListener('click', triggerScan);
+    document.getElementById('price-refresh-btn').addEventListener('click', () => { fetchPrices(); });
+    document.getElementById('price-coin-input').addEventListener('input', updateRefreshButtonHint);
 
     document.getElementById('price-apply-btn').addEventListener('click', () => {
       if (!priceCards || !priceLoaded) return;
       const replacements = [];
+      const _DR = ['price', 'change', 'volume', 'mcap'];
       for (let i = 0; i < priceCards.length; i++) {
+        const card = priceCards[i];
+        const hasCrypto = card.matches.some(m => m.role === 'crypto');
+        const hasData = card.matches.some(m => _DR.includes(m.role));
+        if (!hasCrypto || !hasData) continue;
         const coin = cardCoinAssignments[i] ?? getPriceCoins()[0] ?? 'ETH';
         const coinData = cachedCoinData[coin] ?? null;
-        for (const m of priceCards[i].matches) {
-          // Skip literal tickers — they're already the correct coin symbol;
-          // only the surrounding data layers ({price}, {change}, etc.) get updated.
+        for (const m of card.matches) {
           if (m.role === 'crypto' && m.isLiteral) continue;
-          replacements.push({
-            nodeId: m.nodeId,
-            newText: m.role === 'crypto' ? coin : valueForRole(m.role, coinData),
-          });
+          const rawValue = m.role === 'crypto' ? coin : valueForRole(m.role, coinData);
+          let newText;
+          if (m.namePrefix !== undefined) {
+            // Layer name encodes the prefix, e.g. name="A${price}" → prefix="A$".
+            // Strip leading "$" from the formatted value to avoid "A$$2,279".
+            const val = (m.namePrefix.endsWith('$') && rawValue.startsWith('$'))
+              ? rawValue.slice(1) : rawValue;
+            newText = m.namePrefix + val;
+          } else if (m.matchedVar) {
+            // Token embedded in text content, e.g. content="A${price}".
+            const before = m.currentText.slice(0, m.currentText.indexOf(m.matchedVar));
+            const val = (before.endsWith('$') && rawValue.startsWith('$'))
+              ? rawValue.slice(1) : rawValue;
+            newText = m.currentText.replace(m.matchedVar, val);
+          } else {
+            newText = rawValue;
+          }
+          replacements.push({ nodeId: m.nodeId, newText });
         }
       }
       parent.postMessage({ pluginMessage: { type: 'apply-price', replacements } }, '*');
@@ -1369,8 +1511,8 @@
         // "scanned, no results" ([] ≠ null) from "never scanned" (null).
         priceCards = Array.isArray(msg.cards) ? msg.cards : null;
         cardCoinAssignments = [];
-        renderPriceScanResults(false);
-        if (priceCards && priceCards.length > 0) fetchPrices();
+        assignCoinsToCards();
+        renderPriceScanResults(priceLoaded);
         return;
       }
       if (msg.type === 'prices-result') {
@@ -1387,6 +1529,9 @@
     requestFooterLinksFromMain();
     renderPreview();
     parent.postMessage({ pluginMessage: { type: 'get-api-keys' } }, '*');
+    loadPriceCache();
+    updateTimestampEl();
+    updateRefreshButtonHint();
   </script>
 </body>
 </html>

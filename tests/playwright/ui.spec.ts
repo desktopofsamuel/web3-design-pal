@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const STORAGE_KEY = 'web3dpal_truncate_rules';
+const PRICE_CACHE_KEY = 'web3dpal_price_cache';
 const BUY_ME_COFFEE_URL = 'https://example.com/buy-me-coffee';
 const PROFILE_URL = 'https://desktopofsamuel.com';
 const ethLine = /^0x[a-f0-9]{40}$/;
@@ -201,8 +202,18 @@ async function installFigmaStorageMock(
         // resize-ui is a no-op in browser tests (iframe resize not available).
         if (type === 'resize-ui') { /* no-op */ }
       });
+
+      // Pre-populate price cache so scan results can immediately enable the apply button
+      // without needing a Refresh click (mirrors real usage where user already refreshed).
+      if (Object.keys(cfg.coins).length > 0) {
+        try {
+          localStorage.setItem(cfg.priceKey, JSON.stringify({
+            coins: cfg.coins, source: 'coingecko', timestamp: Date.now(),
+          }));
+        } catch (_) {}
+      }
     },
-    { key: STORAGE_KEY, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL, coins },
+    { key: STORAGE_KEY, priceKey: PRICE_CACHE_KEY, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL, coins },
   );
 }
 
@@ -550,9 +561,10 @@ async function postScanResult(
 }
 
 /**
- * Full happy-path setup: navigate to Price tab, post a scan result, wait for
- * fetch-prices to be answered by the mock (which immediately returns MOCK_COINS),
- * and wait for the apply button to become enabled.
+ * Full happy-path setup: navigate to Price tab, post a scan result, and wait
+ * for the apply button to become enabled. Prices are pre-loaded from the
+ * localStorage cache seeded by installFigmaStorageMock, so no Refresh click
+ * is needed here.
  */
 async function setupPriceTabWithData(
   page: import('@playwright/test').Page,
@@ -560,7 +572,6 @@ async function setupPriceTabWithData(
 ): Promise<void> {
   await openPriceTab(page);
   await postScanResult(page, cards);
-  // The mock auto-responds to fetch-prices; wait for apply button to enable.
   await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
 }
 
@@ -634,12 +645,15 @@ test.describe('Price tab', () => {
     expect(msg!.changeVar).toBe('{change}');
     expect(msg!.volumeVar).toBe('{volume}');
     expect(msg!.mcapVar).toBe('{mcap}');
+    // knownTickers must be sent — it drives literal-ticker auto-detection in code.ts
+    expect(Array.isArray(msg!.knownTickers)).toBe(true);
+    expect((msg!.knownTickers as string[]).length).toBeGreaterThan(0);
   });
 
-  test('price-layer-scan with 2 cards shows pair count in summary', async ({ page }) => {
+  test('price-layer-scan with 2 cards shows card count in summary', async ({ page }) => {
     await openPriceTab(page);
     await postScanResult(page, MOCK_CARDS);
-    await expect(page.locator('#price-scan-summary')).toContainText('2 pairs');
+    await expect(page.locator('#price-scan-summary')).toContainText('2 cards');
   });
 
   test('price-layer-scan with empty cards shows "No matching layer names" message', async ({
@@ -653,11 +667,11 @@ test.describe('Price tab', () => {
     await expect(page.locator('#price-apply-btn')).toBeDisabled();
   });
 
-  test('after prices load, summary says Ready to apply and Update text is enabled', async ({
+  test('after prices load, summary says Ready to update and Update text is enabled', async ({
     page,
   }) => {
     await setupPriceTabWithData(page);
-    await expect(page.locator('#price-scan-summary')).toContainText('Ready to apply');
+    await expect(page.locator('#price-scan-summary')).toContainText('Ready to update');
     await expect(page.locator('#price-apply-btn')).toBeEnabled();
   });
 
@@ -665,6 +679,59 @@ test.describe('Price tab', () => {
     await setupPriceTabWithData(page);
     await expect(page.locator('#price-source-banner')).toBeVisible();
     await expect(page.locator('#price-source-banner')).toContainText('CoinGecko');
+  });
+
+  test('Refresh button is visible in Price tab', async ({ page }) => {
+    await openPriceTab(page);
+    await expect(page.locator('#price-refresh-btn')).toBeVisible();
+  });
+
+  test('Refresh button posts fetch-prices message', async ({ page }) => {
+    await openPriceTab(page);
+    await page.evaluate(() => {
+      const w = window as unknown as { __fetchCapture: Record<string, unknown> | null };
+      w.__fetchCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'fetch-prices') {
+          w.__fetchCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+    await page.locator('#price-refresh-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __fetchCapture: Record<string, unknown> | null }).__fetchCapture,
+    );
+    expect(msg).not.toBeNull();
+    expect(msg!.type).toBe('fetch-prices');
+    expect(Array.isArray(msg!.symbols)).toBe(true);
+  });
+
+  test('timestamp is shown when prices are cached in localStorage', async ({ page }) => {
+    // installFigmaStorageMock pre-seeds the price cache; loadPriceCache() runs on init.
+    await openPriceTab(page);
+    await expect(page.locator('#price-timestamp')).toBeVisible();
+    const text = await page.locator('#price-timestamp').textContent();
+    expect(text).toMatch(/Prices updated/);
+  });
+
+  test('needs-refresh clears when unknown coin is removed from textarea', async ({ page }) => {
+    // MOCK_COINS are pre-cached; adding an unknown coin turns hint on, removing it clears it.
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH,UNKNOWNCOIN');
+    await expect(page.locator('#price-refresh-btn')).toHaveClass(/needs-refresh/);
+    await page.locator('#price-coin-input').fill('ETH');
+    await expect(page.locator('#price-refresh-btn')).not.toHaveClass(/needs-refresh/);
+  });
+
+  test('Refresh button has no needs-refresh when all textarea coins are already cached', async ({
+    page,
+  }) => {
+    // MOCK_COINS pre-seeded in cache (ETH, BTC, SOL, XRP, BNB). Textarea limited to those.
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH,BTC,SOL');
+    await expect(page.locator('#price-refresh-btn')).not.toHaveClass(/needs-refresh/);
   });
 
   test('Update text posts apply-price with a replacements array', async ({ page }) => {
@@ -780,14 +847,425 @@ test.describe('Price tab', () => {
     expect(priceReplacement?.newText).toBe('—');
   });
 
+  // ── Substring / embedded token tests ───────────────────────────────────────
+
+  test('name prefix: layer named "A${price}" with real content "A$23.00" is treated as a full card', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'BCH Row',
+        matches: [
+          { nodeId: 'np1', layerName: 'BCH', currentText: 'BCH', role: 'crypto', isLiteral: true },
+          { nodeId: 'np2', layerName: 'A${price}', currentText: 'A$23.00', role: 'price', namePrefix: 'A$' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+    await expect(page.locator('#price-apply-btn')).toBeEnabled();
+  });
+
+  test('name prefix: apply produces "A$<price>" without doubling the dollar sign', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'BCH Row',
+        matches: [
+          { nodeId: 'np1', layerName: 'BCH', currentText: 'BCH', role: 'crypto', isLiteral: true },
+          { nodeId: 'np2', layerName: 'A${price}', currentText: 'A$23.00', role: 'price', namePrefix: 'A$' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 'np2');
+    expect(priceReplacement).toBeDefined();
+    // Must start with "A$" (not "A$$")
+    expect(priceReplacement!.newText).toMatch(/^A\$[^$]/);
+    expect(priceReplacement!.newText).not.toContain('$$');
+  });
+
+  test('substring match: layer with "A${price}" content is treated as a full card', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'ETH Card',
+        matches: [
+          { nodeId: 's1', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+          { nodeId: 's2', layerName: 'price-label', currentText: 'A${price}', role: 'price', matchedVar: '{price}' },
+        ],
+      },
+    ]);
+    // Full card: has {crypto} + price layer → button must enable after prices load
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+    await expect(page.locator('#price-apply-btn')).toBeEnabled();
+  });
+
+  test('substring match: apply replaces only the {price} token, preserving surrounding text', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'ETH Card',
+        matches: [
+          { nodeId: 's1', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+          { nodeId: 's2', layerName: 'price-label', currentText: 'A${price}', role: 'price', matchedVar: '{price}' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 's2');
+    expect(priceReplacement).toBeDefined();
+    // Must preserve the "A$" prefix and replace only the {price} token
+    expect(priceReplacement!.newText).toMatch(/^A\$/);
+    expect(priceReplacement!.newText).not.toContain('{price}');
+  });
+
+  // ── Partial-card skip tests ─────────────────────────────────────────────────
+
+  test('partial card (price only, no {crypto}) is skipped — apply button stays disabled', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'Price Only Card',
+        matches: [
+          { nodeId: 'p1', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText('skipped');
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  test('partial card ({crypto} only, no price layers) is skipped — apply button stays disabled', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'Crypto Only Card',
+        matches: [
+          { nodeId: 'q1', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText('skipped');
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  // ── Re-apply: layer name as stable anchor ──────────────────────────────────
+
+  test('re-apply: name={price} content=$2,279.40 — detected via name, number gets overwritten', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'r2', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+          { nodeId: 'r1', layerName: '{price}', currentText: '$999.99', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 'r1');
+    expect(priceReplacement).toBeDefined();
+    // Content was already a number — name match must have detected it, new price written
+    expect(priceReplacement!.newText).not.toBe('$999.99');
+    expect(priceReplacement!.newText.length).toBeGreaterThan(0);
+  });
+
+  // ── Both name and content contain the token ─────────────────────────────────
+
+  test('both-token: name=A${price} content=A${price} — matchedVar (chars) wins, apply → A$<price> no double $', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 't2', layerName: 'ticker', currentText: 'ETH', role: 'crypto', isLiteral: true },
+          { nodeId: 't1', layerName: 'A${price}', currentText: 'A${price}', role: 'price', matchedVar: '{price}' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 't1');
+    expect(priceReplacement).toBeDefined();
+    expect(priceReplacement!.newText).toMatch(/^A\$[^$]/);
+    expect(priceReplacement!.newText).not.toContain('{price}');
+    expect(priceReplacement!.newText).not.toContain('$$');
+  });
+
+  // ── Generic name, already-replaced content (2nd apply simulation) ───────────
+
+  test('second-apply: generic name content=$2,279.40 — not detected, button stays disabled', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'g1', layerName: 'price-display', currentText: '$2,279.40', role: 'price' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText('skipped');
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  test('second-apply: generic name content=A$2,279.40 — not detected, button stays disabled', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'g2', layerName: 'price-display', currentText: 'A$2,279.40', role: 'price' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText('skipped');
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  // ── Edge case: name={crypto} but content=ETH ────────────────────────────────
+
+  test('edge-case: name={crypto} content=ETH — name wins, treated as placeholder not isLiteral, content gets overwritten', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'ec1', layerName: '{crypto}', currentText: 'ETH', role: 'crypto' },
+          { nodeId: 'ec2', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    // ec1 is NOT isLiteral — it must appear in replacements (content gets written)
+    const cryptoReplacement = replacements.find((r) => r.nodeId === 'ec1');
+    expect(cryptoReplacement).toBeDefined();
+    expect(cryptoReplacement!.newText).toBe('ETH');
+  });
+
+  // ── Card boundary: single row frame whose children are individual text nodes ──
+  // Before the fix, scanPriceLayers split the Row's direct text children into
+  // separate partial cards. After the fix the whole row is one full card.
+  // These tests assert the UI behaviour once code.ts produces the correct card.
+
+  test('card boundary fix: row with isLiteral BNB + namePrefix A{price} produces one full card', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'BNB Row',
+        matches: [
+          { nodeId: 'cb1', layerName: 'BNB', currentText: 'BNB', role: 'crypto', isLiteral: true },
+          { nodeId: 'cb2', layerName: 'A{price}', currentText: 'A$0.44', role: 'price', namePrefix: 'A' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+    await expect(page.locator('#price-apply-btn')).toBeEnabled();
+  });
+
+  test('card boundary fix: apply on BNB row produces A$<bnbPrice> (no double $)', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BNB');
+    await postScanResult(page, [
+      {
+        cardName: 'BNB Row',
+        matches: [
+          { nodeId: 'cb1', layerName: 'BNB', currentText: 'BNB', role: 'crypto', isLiteral: true },
+          { nodeId: 'cb2', layerName: 'A{price}', currentText: 'A$0.44', role: 'price', namePrefix: 'A' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    // cb1 is isLiteral — must NOT appear in replacements
+    expect(replacements.find((r) => r.nodeId === 'cb1')).toBeUndefined();
+    // cb2 gets A + BNB price ($622.29) → "A$622.29"; prefix 'A' + raw '$622.29' = 'A$622.29'
+    const priceReplacement = replacements.find((r) => r.nodeId === 'cb2');
+    expect(priceReplacement).toBeDefined();
+    expect(priceReplacement!.newText).toMatch(/^A\$[^$]/);
+    expect(priceReplacement!.newText).not.toContain('$$');
+    expect(priceReplacement!.newText).toContain('622');
+  });
+
+  test('card boundary regression: two partial children (old split behavior) are both skipped', async ({
+    page,
+  }) => {
+    // Simulates what the OLD scanPriceLayers would have sent when a Row frame
+    // was selected: one card per direct child text node, each partial.
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'BNB',
+        matches: [
+          { nodeId: 'reg1', layerName: 'BNB', currentText: 'BNB', role: 'crypto', isLiteral: true },
+        ],
+      },
+      {
+        cardName: 'A{price}',
+        matches: [
+          { nodeId: 'reg2', layerName: 'A{price}', currentText: 'A$0.44', role: 'price', namePrefix: 'A' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText('skipped');
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
   // ── Auto-detect ticker tests ────────────────────────────────────────────────
 
-  test('auto-detect: summary says "cards with detected ticker" when isLiteral cards found', async ({
+  test('auto-detect: summary names the detected tickers when isLiteral cards found', async ({
     page,
   }) => {
     await openPriceTab(page);
     await postScanResult(page, MOCK_CARDS_AUTO_DETECT);
-    await expect(page.locator('#price-scan-summary')).toContainText('detected ticker');
+    await expect(page.locator('#price-scan-summary')).toContainText('detected');
   });
 
   test('auto-detect: literal ticker node is NOT in apply-price replacements', async ({ page }) => {
@@ -992,5 +1470,134 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
     );
     expect(msg).not.toBeNull();
     expect(msg!.coingeckoKey).toBe('');
+  });
+});
+
+// ─── Price tab — no cached prices (Refresh not yet clicked) ──────────────────
+// Uses installFigmaStorageMock with empty coins so localStorage is NOT pre-seeded.
+// fetch-prices will respond with {} (empty), simulating a first run with no cached data.
+
+test.describe('Price tab — no cached prices', () => {
+  test.beforeEach(async ({ page }) => {
+    await installFigmaStorageMock(page, {});
+    await page.goto('/ui.html');
+    await page.evaluate((key) => {
+      localStorage.removeItem(key);
+    }, STORAGE_KEY);
+    await page.reload();
+  });
+
+  test('scan finds full card but no prices cached → button disabled, "Click Refresh" shown', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS);
+    await expect(page.locator('#price-scan-summary')).toContainText('Click Refresh to load prices.');
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
+  test('Refresh button shows needs-refresh when prices are missing', async ({ page }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS);
+    await expect(page.locator('#price-refresh-btn')).toHaveClass(/needs-refresh/);
+  });
+
+  test('Refresh stays highlighted after fetch when response has no coin data', async ({ page }) => {
+    // Mock returns {} (empty), so cachedCoinData stays empty — hint remains
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS);
+    await expect(page.locator('#price-refresh-btn')).toHaveClass(/needs-refresh/);
+    await page.locator('#price-refresh-btn').click();
+    await page.locator('#price-refresh-btn:not([disabled])').waitFor({ timeout: 5000 });
+    // All textarea coins still missing → hint stays on
+    await expect(page.locator('#price-refresh-btn')).toHaveClass(/needs-refresh/);
+  });
+
+  test('unknown token in textarea: no cache → Refresh button highlighted', async ({ page }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('UNKNOWNCOIN');
+    // Even without a scan, updating textarea triggers the hint
+    await expect(page.locator('#price-refresh-btn')).toHaveClass(/needs-refresh/);
+  });
+
+  test('unknown literal ticker detected in scan → Refresh button highlighted', async ({ page }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'Mystery Row',
+        matches: [
+          { nodeId: 'unk1', layerName: 'ZZZ', currentText: 'ZZZ', role: 'crypto', isLiteral: true },
+          { nodeId: 'unk2', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-refresh-btn')).toHaveClass(/needs-refresh/);
+  });
+
+  test('custom ticker (DAI) added to textarea: scan sends it in knownTickers so it can be auto-detected', async ({
+    page,
+  }) => {
+    // The fix: knownTickers is sourced from the textarea, not a hardcoded list.
+    // Adding DAI to the textarea means a Figma layer with "DAI" text is now detected
+    // as isLiteral on the next scan — no code change needed for new tokens.
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH, DAI');
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __scanCapture: Record<string, unknown> | null };
+      w.__scanCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'scan-price-layers') {
+          w.__scanCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+    await page.getByRole('button', { name: 'Scan' }).click();
+
+    const msg = await page.evaluate(
+      () => (window as unknown as { __scanCapture: Record<string, unknown> | null }).__scanCapture,
+    );
+    expect(msg).not.toBeNull();
+    expect((msg!.knownTickers as string[])).toContain('DAI');
+    expect((msg!.knownTickers as string[])).toContain('ETH');
+  });
+
+  test('unknown token: after Refresh with no data for it, apply gives — for price', async ({
+    page,
+  }) => {
+    // Mock responds with empty coins (cfg.coins = {}), so UNKNOWNCOIN has no data.
+    // priceLoaded becomes true but cachedCoinData['UNKNOWNCOIN'] is undefined.
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('UNKNOWNCOIN');
+    await postScanResult(page, MOCK_CARDS);
+    // Click Refresh — mock responds with {} (no data for UNKNOWNCOIN)
+    await page.locator('#price-refresh-btn').click();
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 'n2' || r.nodeId === 'n4');
+    expect(priceReplacement?.newText).toBe('—');
   });
 });
