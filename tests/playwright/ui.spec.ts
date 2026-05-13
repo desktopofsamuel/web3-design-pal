@@ -246,6 +246,10 @@ test.describe('Web3 Design Pal UI', () => {
     ]);
   });
 
+  test('top nav tabs are ordered Address, Price, TxID', async ({ page }) => {
+    await expect(page.locator('.segment [role="tab"]')).toHaveText(['Address', 'Price', 'TxID']);
+  });
+
   test('footer links are valid and point to expected URLs', async ({ page }) => {
     await expect(page.locator('#link-buy-me-coffee')).toHaveAttribute('href', BUY_ME_COFFEE_URL);
     await expect(page.locator('#link-profile')).toHaveAttribute('href', PROFILE_URL);
@@ -258,6 +262,32 @@ test.describe('Web3 Design Pal UI', () => {
       page.getByText('Transaction ID tools will be available in a future update.'),
     ).toBeVisible();
     await expect(page.locator('#view-wallet')).toHaveClass(/view-hidden/);
+  });
+
+  test('Settings view scrolls inside fixed content area', async ({ page }) => {
+    await page.getByRole('button', { name: 'Settings' }).click();
+
+    const metrics = await page.evaluate(() => {
+      const c = document.querySelector('.content-below-header') as HTMLElement | null;
+      if (!c) return null;
+      const overflowY = window.getComputedStyle(c).overflowY;
+      const before = c.scrollTop;
+      c.scrollTop = 9999;
+      return {
+        before,
+        after: c.scrollTop,
+        scrollHeight: c.scrollHeight,
+        clientHeight: c.clientHeight,
+        overflowY,
+      };
+    });
+
+    expect(metrics).not.toBeNull();
+    expect(metrics!.overflowY).toBe('auto');
+    expect(metrics!.scrollHeight).toBeGreaterThanOrEqual(metrics!.clientHeight);
+    if (metrics!.scrollHeight > metrics!.clientHeight) {
+      expect(metrics!.after).toBeGreaterThan(metrics!.before);
+    }
   });
 
   test('Solana chip updates preview', async ({ page }) => {
@@ -446,7 +476,7 @@ test.describe('Truncate settings page', () => {
     await page.reload();
   });
 
-  test('opens with heading, copy, Save/Back, and default start 6 / end 4', async ({ page }) => {
+  test('opens with heading, copy, Save, and default start 6 / end 4', async ({ page }) => {
     await page.getByRole('button', { name: 'Settings' }).click();
 
     await expect(page.locator('#view-settings')).toBeVisible();
@@ -462,7 +492,7 @@ test.describe('Truncate settings page', () => {
     await expect(page.getByLabel('Characters at end')).toHaveValue('4');
 
     await expect(page.locator('#settings-save')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Back' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Back' })).toHaveCount(0);
   });
 
   test('save sends save-truncate-rules with start/end, toast, and closes settings', async ({
@@ -527,10 +557,10 @@ test.describe('Truncate settings page', () => {
     expect(last.end).toBe(0);
   });
 
-  test('Back after editing shows unsaved toast and returns to wallet', async ({ page }) => {
+  test('switching tabs after editing settings shows unsaved toast and returns to wallet', async ({ page }) => {
     await page.getByRole('button', { name: 'Settings' }).click();
     await page.getByLabel('Characters at start').fill('9');
-    await page.getByRole('button', { name: 'Back' }).click();
+    await page.getByRole('tab', { name: 'Address' }).click();
 
     await expect(page.locator('#toast')).toContainText('Changes were not saved.');
     await expect(page.locator('#view-wallet')).toBeVisible();
@@ -583,11 +613,12 @@ test.describe('Price tab', () => {
     await page.goto('/ui.html');
     await page.evaluate((key) => {
       localStorage.removeItem(key);
+      localStorage.setItem('web3dpal_api_keys', JSON.stringify({ cgKey: 'CG-testkey', cmcKey: '' }));
     }, STORAGE_KEY);
     await page.reload();
   });
 
-  test('Price tab is shown and Wallet tab is hidden when Price tab is clicked', async ({
+  test('Price tab is shown and Address tab is hidden when Price tab is clicked', async ({
     page,
   }) => {
     await openPriceTab(page);
@@ -599,7 +630,7 @@ test.describe('Price tab', () => {
     await openPriceTab(page);
     const value = await page.locator('#price-coin-input').inputValue();
     const coins = value.split(',').map((s) => s.trim());
-    expect(coins).toContain('ETH');
+    expect(coins).toContain('AAVE');
     expect(coins).toContain('BTC');
     expect(coins).toContain('SOL');
     expect(coins.length).toBeGreaterThanOrEqual(30);
@@ -650,6 +681,28 @@ test.describe('Price tab', () => {
     expect((msg!.knownTickers as string[]).length).toBeGreaterThan(0);
   });
 
+  test('duplicate coins in textarea shows error toast and blocks scan request', async ({ page }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH, BTC, ETH');
+    await page.evaluate(() => {
+      const w = window as unknown as { __scanCapture: Record<string, unknown> | null };
+      w.__scanCapture = null;
+      window.addEventListener('message', (e: Event) => {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'scan-price-layers') w.__scanCapture = pm;
+      });
+    });
+
+    await page.getByRole('button', { name: 'Scan' }).click();
+    await expect(page.locator('#toast')).toContainText(
+      'Duplicate coins found: ETH. Remove duplicates and try again.',
+    );
+    const captured = await page.evaluate(
+      () => (window as unknown as { __scanCapture: Record<string, unknown> | null }).__scanCapture,
+    );
+    expect(captured).toBeNull();
+  });
+
   test('price-layer-scan with 2 cards shows card count in summary', async ({ page }) => {
     await openPriceTab(page);
     await postScanResult(page, MOCK_CARDS);
@@ -667,12 +720,44 @@ test.describe('Price tab', () => {
     await expect(page.locator('#price-apply-btn')).toBeDisabled();
   });
 
+  test('Update text disables again when a later scan returns no matching layer names', async ({
+    page,
+  }) => {
+    await setupPriceTabWithData(page);
+    await expect(page.locator('#price-apply-btn')).toBeEnabled();
+
+    await postSelectionContext(page, { type: 'price-layer-scan', cards: [] });
+    await expect(page.locator('#price-no-selection')).toContainText(
+      'No matching layer names found in selection.',
+    );
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
+  });
+
   test('after prices load, summary says Ready to update and Update text is enabled', async ({
     page,
   }) => {
     await setupPriceTabWithData(page);
     await expect(page.locator('#price-scan-summary')).toContainText('Ready to update');
     await expect(page.locator('#price-apply-btn')).toBeEnabled();
+  });
+
+  test('selection change clears stale scan and disables Update text until re-scan', async ({
+    page,
+  }) => {
+    await setupPriceTabWithData(page);
+    await expect(page.locator('#price-apply-btn')).toBeEnabled();
+
+    await postSelectionContext(page, {
+      type: 'selection-context',
+      mode: 'create-on-page',
+      textTargetCount: 0,
+      previewBatchSize: 0,
+    });
+
+    await expect(page.locator('#price-no-selection')).toContainText(
+      'No frame or group selected in Figma.',
+    );
+    await expect(page.locator('#price-apply-btn')).toBeDisabled();
   });
 
   test('source banner appears and names CoinGecko after prices load', async ({ page }) => {
@@ -706,6 +791,31 @@ test.describe('Price tab', () => {
     expect(msg).not.toBeNull();
     expect(msg!.type).toBe('fetch-prices');
     expect(Array.isArray(msg!.symbols)).toBe(true);
+  });
+
+  test('Refresh shows persistent yellow callout and does not post fetch-prices when no API key is set', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('web3dpal_api_keys', JSON.stringify({ cgKey: '', cmcKey: '' }));
+    });
+    await page.reload();
+    await openPriceTab(page);
+    await page.evaluate(() => {
+      const w = window as unknown as { __fetchCapture: Record<string, unknown> | null };
+      w.__fetchCapture = null;
+      window.addEventListener('message', (e: Event) => {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'fetch-prices') w.__fetchCapture = pm;
+      });
+    });
+    await page.locator('#price-refresh-btn').click();
+    await expect(page.locator('#price-source-banner')).toBeVisible();
+    await expect(page.locator('#price-source-banner')).toContainText(
+      'Set your API key in Settings first, then refresh prices.',
+    );
+    const captured = await page.evaluate(
+      () => (window as unknown as { __fetchCapture: Record<string, unknown> | null }).__fetchCapture,
+    );
+    expect(captured).toBeNull();
   });
 
   test('timestamp is shown when prices are cached in localStorage', async ({ page }) => {
@@ -1126,7 +1236,7 @@ test.describe('Price tab', () => {
 
   // ── Edge case: name={crypto} but content=ETH ────────────────────────────────
 
-  test('edge-case: name={crypto} content=ETH — name wins, treated as placeholder not isLiteral, content gets overwritten', async ({
+  test('edge-case: name={crypto} content=ETH — literal ticker is preserved and only price layers update', async ({
     page,
   }) => {
     await openPriceTab(page);
@@ -1161,10 +1271,11 @@ test.describe('Price tab', () => {
 
     expect(msg).not.toBeNull();
     const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
-    // ec1 is NOT isLiteral — it must appear in replacements (content gets written)
+    // Literal ticker text under {crypto} should be preserved.
     const cryptoReplacement = replacements.find((r) => r.nodeId === 'ec1');
-    expect(cryptoReplacement).toBeDefined();
-    expect(cryptoReplacement!.newText).toBe('ETH');
+    expect(cryptoReplacement).toBeUndefined();
+    // Price layer should still be updated.
+    expect(replacements.find((r) => r.nodeId === 'ec2')).toBeDefined();
   });
 
   // ── Card boundary: single row frame whose children are individual text nodes ──
@@ -1341,6 +1452,301 @@ test.describe('Price tab', () => {
     const ethPrice = replacements.find((r) => r.nodeId === 'b2');
     expect(ethPrice?.newText).toContain('2'); // ETH is ~$2k range
   });
+
+  test('bug repro: name={crypto} with literal BTC content should preserve ticker and only update price', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    // Force a pool coin different from the literal ticker so overwrite is obvious.
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'br1', layerName: '{crypto}', currentText: 'BTC', role: 'crypto' },
+          { nodeId: 'br2', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    // Desired behavior: literal BTC should be preserved, so crypto layer should not be replaced.
+    expect(replacements.find((r) => r.nodeId === 'br1')).toBeUndefined();
+    expect(replacements.find((r) => r.nodeId === 'br2')).toBeDefined();
+  });
+
+  test('summary uses detected ticker wording when {crypto} content is literal text', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'sum1', layerName: '{crypto}', currentText: 'test', role: 'crypto' },
+          { nodeId: 'sum2', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText('test detected');
+    await expect(page.locator('#price-scan-summary')).not.toContainText('coin from pool');
+  });
+
+  test('summary warns when detected literal ticker is not in coin list', async ({ page }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'sum3', layerName: '{crypto}', currentText: 'test', role: 'crypto' },
+          { nodeId: 'sum4', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await expect(page.locator('#price-scan-summary')).toContainText(
+      'test not in the coin list — price will not be inserted.',
+    );
+  });
+
+  test('bug repro: content A$132.22 should keep A$ prefix and only update numeric part', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'br3', layerName: 'ticker', currentText: 'BTC', role: 'crypto', isLiteral: true },
+          { nodeId: 'br4', layerName: '{price}', currentText: 'A$132.22', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 'br4');
+    expect(priceReplacement).toBeDefined();
+    // Desired behavior: keep "A$" wrapper and update only the numeric value.
+    expect(priceReplacement!.newText).toMatch(/^A\$/);
+  });
+
+  test('bug related: name={crypto} with BTC content should use BTC price (not pool coin)', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    // Make pool start with ETH so any BTC result proves literal content took precedence.
+    await page.locator('#price-coin-input').fill('ETH,BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'br5', layerName: '{crypto}', currentText: 'BTC', role: 'crypto' },
+          { nodeId: 'br6', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    // Desired behavior: literal BTC should be preserved.
+    expect(replacements.find((r) => r.nodeId === 'br5')).toBeUndefined();
+    // Desired behavior: BTC price should be used (~$76k in MOCK_COINS), not ETH (~$2k).
+    const priceReplacement = replacements.find((r) => r.nodeId === 'br6');
+    expect(priceReplacement).toBeDefined();
+    expect(priceReplacement!.newText).toContain('76');
+  });
+
+  test('bug related: name={crypto} with lowercase btc content should still be preserved and treated as literal', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH, BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'br7', layerName: '{crypto}', currentText: 'btc', role: 'crypto' },
+          { nodeId: 'br8', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    // Desired behavior: crypto text "btc" should be treated as literal ticker and left untouched.
+    expect(replacements.find((r) => r.nodeId === 'br7')).toBeUndefined();
+    expect(replacements.find((r) => r.nodeId === 'br8')).toBeDefined();
+  });
+
+  test('bug related: A$1,234.56 should keep A$ prefix and update only numeric fragment', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'br9', layerName: 'ticker', currentText: 'BTC', role: 'crypto', isLiteral: true },
+          { nodeId: 'br10', layerName: '{price}', currentText: 'A$1,234.56', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 'br10');
+    expect(priceReplacement).toBeDefined();
+    // Desired behavior: preserve wrapper prefix, only number should change.
+    expect(priceReplacement!.newText).toMatch(/^A\$/);
+  });
+
+  test('bug related: text "A$132.22 USD" should keep surrounding text and only replace number', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'br11', layerName: 'ticker', currentText: 'BTC', role: 'crypto', isLiteral: true },
+          { nodeId: 'br12', layerName: '{price}', currentText: 'A$132.22 USD', role: 'price' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const priceReplacement = replacements.find((r) => r.nodeId === 'br12');
+    expect(priceReplacement).toBeDefined();
+    // Desired behavior: keep prefix/suffix labels; only numeric section should change.
+    expect(priceReplacement!.newText).toMatch(/^A\$/);
+    expect(priceReplacement!.newText).toMatch(/ USD$/);
+  });
 });
 
 // ─── Settings — Price API Keys + Price formatting ─────────────────────────────
@@ -1375,7 +1781,7 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
     await expect(page.locator('#price-show-commas')).toBeChecked();
   });
 
-  test('Save API Keys with valid CG- key posts save-api-keys', async ({ page }) => {
+  test('Save API Key with valid CG- key posts save-api-keys', async ({ page }) => {
     await page.evaluate(() => {
       const w = window as unknown as { __apiKeyCapture: Record<string, unknown> | null };
       w.__apiKeyCapture = null;
@@ -1389,7 +1795,7 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
     });
 
     await page.locator('#settings-cg-key').fill('CG-validkey123');
-    await page.getByRole('button', { name: 'Save API Keys' }).click();
+    await page.getByRole('button', { name: 'Save API Key' }).click();
 
     const msg = await page.evaluate(
       () =>
@@ -1427,7 +1833,7 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
     });
 
     await page.locator('#settings-cg-key').fill('not-a-valid-key');
-    await page.getByRole('button', { name: 'Save API Keys' }).click();
+    await page.getByRole('button', { name: 'Save API Key' }).click();
 
     await expect(page.locator('#settings-cg-key-error')).toBeVisible();
     const captured = await page.evaluate(
@@ -1440,7 +1846,7 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
   test('typing in the CG key field clears the inline error', async ({ page }) => {
     // Trigger error first
     await page.locator('#settings-cg-key').fill('bad');
-    await page.getByRole('button', { name: 'Save API Keys' }).click();
+    await page.getByRole('button', { name: 'Save API Key' }).click();
     await expect(page.locator('#settings-cg-key-error')).toBeVisible();
 
     // Typing should clear it immediately
@@ -1462,7 +1868,7 @@ test.describe('Settings — Price API Keys and Price formatting', () => {
     });
 
     // Leave the CG key empty and click save
-    await page.getByRole('button', { name: 'Save API Keys' }).click();
+    await page.getByRole('button', { name: 'Save API Key' }).click();
 
     const msg = await page.evaluate(
       () =>
@@ -1483,6 +1889,7 @@ test.describe('Price tab — no cached prices', () => {
     await page.goto('/ui.html');
     await page.evaluate((key) => {
       localStorage.removeItem(key);
+      localStorage.setItem('web3dpal_api_keys', JSON.stringify({ cgKey: 'CG-testkey', cmcKey: '' }));
     }, STORAGE_KEY);
     await page.reload();
   });
@@ -1599,5 +2006,54 @@ test.describe('Price tab — no cached prices', () => {
     const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
     const priceReplacement = replacements.find((r) => r.nodeId === 'n2' || r.nodeId === 'n4');
     expect(priceReplacement?.newText).toBe('—');
+  });
+
+  test('layer names {crypto}/{price}/{change} with content test/--/--: Refresh + Scan + Update keeps ticker and writes fallbacks', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    // Ensure "test" is treated as a known literal ticker during scan.
+    await page.locator('#price-coin-input').fill('TEST');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'x1', layerName: '{crypto}', currentText: 'test', role: 'crypto' },
+          { nodeId: 'x2', layerName: '{price}', currentText: '--', role: 'price' },
+          { nodeId: 'x3', layerName: '{change}', currentText: '--', role: 'change' },
+        ],
+      },
+    ]);
+
+    // In this suite, Refresh returns empty prices (installFigmaStorageMock(..., {})).
+    await page.locator('#price-refresh-btn').click();
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    // Literal ticker under {crypto} should be preserved.
+    expect(replacements.find((r) => r.nodeId === 'x1')).toBeUndefined();
+    // Missing coin data -> fallback em dash for both price and change.
+    expect(replacements.find((r) => r.nodeId === 'x2')?.newText).toBe('—');
+    expect(replacements.find((r) => r.nodeId === 'x3')?.newText).toBe('—');
   });
 });

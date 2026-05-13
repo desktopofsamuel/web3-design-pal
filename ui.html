@@ -19,8 +19,9 @@
     html, body {
       margin: 0;
       padding: 0;
-      width: 100%;
-      height: auto;
+      width: 320px;
+      min-width: 320px;
+      height: 100%;
       font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 11px;
       color: rgba(0, 0, 0, 0.8);
@@ -28,7 +29,9 @@
       overflow: hidden;
     }
     .root {
-      width: 100%;
+      width: 320px;
+      min-width: 320px;
+      height: 100%;
       display: flex;
       flex-direction: column;
     }
@@ -85,7 +88,10 @@
     }
     .content-below-header {
       width: 100%;
-      flex: 1;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .view-hidden {
       display: none !important;
@@ -135,6 +141,29 @@
       display: flex;
       flex-direction: column;
       width: 100%;
+    }
+    .preview-wrap {
+      position: relative;
+    }
+    .wallet-refresh-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: rgba(71, 85, 105, 0.72);
+      cursor: pointer;
+      z-index: 2;
+    }
+    .wallet-refresh-btn:hover {
+      background: rgba(148, 163, 184, 0.22);
+      color: rgba(71, 85, 105, 0.86);
     }
     .network-block {
       padding: 14px 14px 0;
@@ -248,6 +277,7 @@
       justify-content: center;
       padding: 32px 20px;
       text-align: center;
+      min-height: 100%;
     }
     .txid-icon {
       color: rgba(0, 0, 0, 0.25);
@@ -284,6 +314,15 @@
     .settings-field {
       margin-bottom: 12px;
     }
+    .settings-two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .settings-two-col .settings-field {
+      margin-bottom: 0;
+    }
     .settings-field label {
       display: block;
       font-size: 10px;
@@ -309,6 +348,16 @@
       gap: 8px;
       margin-top: 20px;
       flex-wrap: wrap;
+    }
+    .settings-checkbox-row {
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      align-items: center;
+    }
+    .settings-checkbox-row .truncate-row {
+      margin: 0;
     }
     .btn-secondary {
       background: rgba(0, 0, 0, 0.06);
@@ -535,9 +584,9 @@
   <div class="root">
     <header class="top-bar">
       <div class="segment" role="tablist" aria-label="Mode">
-        <button type="button" class="segment-tab" role="tab" id="tab-wallet" aria-selected="true" aria-controls="view-wallet">Wallet</button>
-        <button type="button" class="segment-tab" role="tab" id="tab-txid" aria-selected="false" aria-controls="view-txid">TxID</button>
+        <button type="button" class="segment-tab" role="tab" id="tab-wallet" aria-selected="true" aria-controls="view-wallet">Address</button>
         <button type="button" class="segment-tab" role="tab" id="tab-price" aria-selected="false" aria-controls="view-price">Price</button>
+        <button type="button" class="segment-tab" role="tab" id="tab-txid" aria-selected="false" aria-controls="view-txid">TxID</button>
       </div>
       <button type="button" class="icon-btn" id="btn-settings" aria-label="Settings">
         <!-- Lucide "settings" (MIT) -->
@@ -546,8 +595,13 @@
     </header>
     <div class="content-below-header">
       <div class="view-wallet" id="view-wallet" role="tabpanel">
-        <div class="preview">
-          <div class="preview-inner" id="preview-inner" aria-live="polite"></div>
+        <div class="preview-wrap">
+          <button type="button" class="wallet-refresh-btn" id="btn-generate" aria-label="Refresh" title="Refresh">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+          <div class="preview">
+            <div class="preview-inner" id="preview-inner" aria-live="polite"></div>
+          </div>
         </div>
         <div class="network-block">
           <p class="label-muted">Network</p>
@@ -557,12 +611,11 @@
           <input type="checkbox" id="truncate" />
           <span>Truncate address</span>
         </label>
-        <p class="hint-meta" id="hint-line"></p>
-        <p class="desc" id="hint"></p>
         <div class="actions">
-          <button type="button" class="btn btn-gen" id="btn-generate">Refresh</button>
           <button type="button" class="btn btn-apply" id="btn-apply">Create</button>
         </div>
+        <p class="hint-meta" id="hint-line"></p>
+        <p class="desc" id="hint"></p>
       </div>
       <div class="view-txid view-hidden" id="view-txid" role="tabpanel">
         <div class="txid-icon" aria-hidden="true">
@@ -586,11 +639,11 @@
         <input type="hidden" id="price-var-mcap" value="{mcap}" />
         <div class="price-section">
           <p class="label-muted">Coins (comma-separated, one picked at random per card)</p>
-          <textarea id="price-coin-input" spellcheck="false" rows="3" placeholder="ETH, BTC, SOL…">ETH, BTC, SOL, XRP, BNB, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, ATOM, FIL, NEAR, APT, ARB, OP, SUI, TRX, DOGE, SHIB, PEPE, WIF, TON, INJ, SEI, TIA, JUP, DAI, USDC, USDT, WBTC, AAVE, MKR, LDO, CRV</textarea>
+          <textarea id="price-coin-input" spellcheck="false" rows="6" placeholder="Enter Crypto symbols">AAVE, ADA, ALGO, ANKR, ARB, ATOM, AVAX, BCH, BNB, BTC, CRV, DAI, DOGE, DOT, FIL, HYPE, INJ, JUP, LDO, LINK, LTC, MATIC, MKR, NEAR, OP, PEPE, SEI, SHIB, SOL, SUI, TIA, TON, TRX, UNI, USDC, USDT, WBTC, WIF, XAUT, XRP</textarea>
         </div>
+
         <div class="price-section">
           <p class="label-muted">Layers found in selection</p>
-          <div id="price-no-selection" class="desc">No frame or group selected in Figma.</div>
           <div id="price-scan-summary" class="view-hidden"></div>
           <div id="price-layer-list" class="view-hidden"></div>
         </div>
@@ -599,20 +652,22 @@
           <button type="button" class="btn btn-secondary" id="price-refresh-btn">Refresh</button>
           <button type="button" class="btn btn-apply" id="price-apply-btn" disabled>Update text</button>
         </div>
+        <div id="price-no-selection" class="desc">No frame or group selected in Figma.</div>
       </div>
       <div class="view-settings view-hidden" id="view-settings">
         <h2 class="settings-title">Truncate rules</h2>
         <p class="settings-desc">When truncation is on, the preview and canvas use these character counts from the start and end of the address. If the sum is not less than the full length, the full address is shown.</p>
-        <div class="settings-field">
-          <label for="settings-start">Characters at start</label>
-          <input type="number" id="settings-start" min="0" max="64" value="6" />
-        </div>
-        <div class="settings-field">
-          <label for="settings-end">Characters at end</label>
-          <input type="number" id="settings-end" min="0" max="64" value="4" />
+        <div class="settings-two-col">
+          <div class="settings-field">
+            <label for="settings-start">Characters at start</label>
+            <input type="number" id="settings-start" min="0" max="64" value="6" />
+          </div>
+          <div class="settings-field">
+            <label for="settings-end">Characters at end</label>
+            <input type="number" id="settings-end" min="0" max="64" value="4" />
+          </div>
         </div>
         <div class="settings-actions">
-          <button type="button" class="btn btn-secondary" id="settings-back">Back</button>
           <button type="button" class="btn btn-apply" id="settings-save" aria-busy="false">
             <span class="save-spinner" aria-hidden="true"></span>
             <span class="save-text">Save</span>
@@ -631,7 +686,7 @@
           <input type="password" id="settings-cmc-key" autocomplete="off" placeholder="Paste key here" />
         </div>
         <div class="settings-actions" style="margin-top:8px;">
-          <button type="button" class="btn btn-apply" id="settings-apikeys-save">Save API Keys</button>
+          <button type="button" class="btn btn-apply" id="settings-apikeys-save">Save API Key</button>
         </div>
         <h2 class="settings-title" style="margin-top:20px;">Price formatting</h2>
         <p class="settings-desc">Controls how price, volume, and market cap values are displayed when inserted into Figma.</p>
@@ -640,9 +695,9 @@
           <input type="number" id="price-decimals" value="2" min="0" max="8" />
         </div>
         <div class="settings-field">
-          <div class="price-format-row">
-            <label><input type="checkbox" id="price-show-symbol" checked /> $ symbol</label>
-            <label><input type="checkbox" id="price-show-commas" checked /> Commas</label>
+          <div class="settings-checkbox-row">
+            <label class="truncate-row"><input type="checkbox" id="price-show-symbol" checked /> <span>$ symbol</span></label>
+            <label class="truncate-row"><input type="checkbox" id="price-show-commas" checked /> <span>Commas</span></label>
           </div>
         </div>
       </div>
@@ -688,6 +743,8 @@
     let priceFetching = false;
     /** @type {number|null} */
     let priceTimestamp = null;
+    /** @type {'coingecko' | 'coinmarketcap' | null} */
+    let priceSource = null;
     /** @type {Array<{cardName:string, matches:Array<{nodeId:string,layerName:string,currentText:string,role:string}>}> | null} */
     let priceCards = null;
     /** @type {string[]} */
@@ -1055,6 +1112,22 @@
       } catch (_) {}
     }
 
+    function updatePriceBanner() {
+      const banner = document.getElementById('price-source-banner');
+      if (!banner) return;
+      if (!coingeckoKey && !cmcKey) {
+        banner.textContent = 'Set your API key in Settings first, then refresh prices.';
+        banner.classList.remove('view-hidden');
+        return;
+      }
+      if (priceSource) {
+        banner.textContent = `Prices via ${priceSource === 'coinmarketcap' ? 'CoinMarketCap' : 'CoinGecko'}.`;
+        banner.classList.remove('view-hidden');
+        return;
+      }
+      banner.classList.add('view-hidden');
+    }
+
     function loadPriceCache() {
       try {
         const raw = localStorage.getItem(PRICE_CACHE_KEY);
@@ -1064,11 +1137,8 @@
           cachedCoinData = p.coins;
           priceLoaded = true;
           priceTimestamp = typeof p.timestamp === 'number' ? p.timestamp : null;
-          const banner = document.getElementById('price-source-banner');
-          if (banner && p.source) {
-            banner.textContent = `Prices via ${p.source === 'coinmarketcap' ? 'CoinMarketCap' : 'CoinGecko'}.`;
-            banner.classList.remove('view-hidden');
-          }
+          priceSource = p.source === 'coinmarketcap' || p.source === 'coingecko' ? p.source : null;
+          updatePriceBanner();
           updateRefreshButtonHint();
         }
       } catch (_) {}
@@ -1139,10 +1209,59 @@
       return '—';
     }
 
+    /**
+     * Replaces the first numeric-like token inside a string and preserves surrounding text.
+     * Examples:
+     * - "A$132.22" -> "A$76,511.00" (or "A76,511.00" when $ display is disabled)
+     * - "A$132.22 USD" -> "A$76,511.00 USD"
+     */
+    function replaceFirstNumericToken(sourceText, nextValue) {
+      const m = sourceText.match(/[-+]?\$?\d[\d,]*(?:\.\d+)?%?/);
+      if (!m || m.index == null) return null;
+      const start = m.index;
+      const end = start + m[0].length;
+      return sourceText.slice(0, start) + nextValue + sourceText.slice(end);
+    }
+
     function getPriceCoins() {
       const raw = document.getElementById('price-coin-input').value;
       const coins = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0);
       return coins.length > 0 ? coins : ['ETH'];
+    }
+
+    function getDuplicateCoins(coins) {
+      const seen = new Set();
+      const dupes = [];
+      for (const c of coins) {
+        if (seen.has(c)) {
+          if (!dupes.includes(c)) dupes.push(c);
+        } else {
+          seen.add(c);
+        }
+      }
+      return dupes;
+    }
+
+    function validateCoinInputUnique() {
+      const coins = getPriceCoins();
+      const dupes = getDuplicateCoins(coins);
+      if (dupes.length === 0) return true;
+      showToast(`Duplicate coins found: ${dupes.join(', ')}. Remove duplicates and try again.`);
+      return false;
+    }
+
+    function isPlaceholderCryptoText(value) {
+      return typeof value === 'string' && value.trim() === '{crypto}';
+    }
+
+    function isLiteralCryptoMatch(match) {
+      if (!match || match.role !== 'crypto') return false;
+      if (match.isLiteral) return true;
+      if (typeof match.currentText !== 'string') return false;
+      if (isPlaceholderCryptoText(match.currentText)) return false;
+      // Treat a real ticker string in a {crypto} layer as literal even when scan data
+      // did not explicitly mark isLiteral (e.g. tests or older scan payloads).
+      return true;
     }
 
     function shuffled(arr) {
@@ -1163,8 +1282,8 @@
       let poolIdx = 0;
       cardCoinAssignments = priceCards.map((card) => {
         // If this card has a literal ticker (auto-detected), use it directly.
-        const literal = card.matches.find(m => m.role === 'crypto' && m.isLiteral);
-        if (literal) return literal.currentText;
+        const literal = card.matches.find(m => isLiteralCryptoMatch(m));
+        if (literal) return literal.currentText.trim().toUpperCase();
         return pool[poolIdx++];
       });
     }
@@ -1204,12 +1323,18 @@
         !c.matches.some(m => DATA_ROLES.includes(m.role))
       );
 
-      // Literal tickers detected inside full cards (e.g. a layer already named "ETH")
+      // Literal tickers detected inside full cards (e.g. a layer already named "ETH").
+      // Use isLiteralCryptoMatch so "{crypto}" layers with real text content are
+      // treated as literal too (not pool-assigned).
       const literalTickers = [...new Set(
         fullCards.flatMap(c =>
-          c.matches.filter(m => m.role === 'crypto' && m.isLiteral).map(m => m.currentText)
+          c.matches.filter(m => isLiteralCryptoMatch(m)).map(m => m.currentText)
         )
       )];
+      const poolCoinSet = new Set(getPriceCoins().map((c) => c.toUpperCase()));
+      const literalMissingFromList = literalTickers.filter(
+        (ticker) => !poolCoinSet.has(String(ticker).trim().toUpperCase()),
+      );
 
       const lines = [];
 
@@ -1219,6 +1344,10 @@
         } else {
           lines.push(`${fullCards.length} card${fullCards.length !== 1 ? 's' : ''} found — coin from pool, price will be inserted.`);
         }
+      }
+
+      if (literalMissingFromList.length > 0) {
+        lines.push(`${literalMissingFromList.join(', ')} not in the coin list — price will not be inserted.`);
       }
 
       if (missingCryptoCards.length > 0) {
@@ -1256,6 +1385,11 @@
 
     function fetchPrices() {
       if (priceFetching) return;
+      if (!validateCoinInputUnique()) return;
+      if (!coingeckoKey && !cmcKey) {
+        updatePriceBanner();
+        return;
+      }
       priceFetching = true;
       const btn = document.getElementById('price-refresh-btn');
       btn.textContent = 'Fetching…';
@@ -1286,13 +1420,10 @@
       cachedCoinData = msg.coins || {};
       priceLoaded = true;
       priceTimestamp = Date.now();
+      priceSource = msg.source === 'coinmarketcap' || msg.source === 'coingecko' ? msg.source : null;
       savePriceCache(cachedCoinData, msg.source);
 
-      const banner = document.getElementById('price-source-banner');
-      if (msg.source) {
-        banner.textContent = `Prices via ${msg.source === 'coinmarketcap' ? 'CoinMarketCap' : 'CoinGecko'}.`;
-        banner.classList.remove('view-hidden');
-      }
+      updatePriceBanner();
 
       assignCoinsToCards();
       updateTimestampEl();
@@ -1302,6 +1433,7 @@
     }
 
     function triggerScan() {
+      if (!validateCoinInputUnique()) return;
       const cryptoVar = document.getElementById('price-var-crypto').value.trim() || '{crypto}';
       const priceVar  = document.getElementById('price-var-price').value.trim()  || '{price}';
       const changeVar = document.getElementById('price-var-change').value.trim() || '{change}';
@@ -1338,7 +1470,7 @@
         const coin = cardCoinAssignments[i] ?? getPriceCoins()[0] ?? 'ETH';
         const coinData = cachedCoinData[coin] ?? null;
         for (const m of card.matches) {
-          if (m.role === 'crypto' && m.isLiteral) continue;
+          if (isLiteralCryptoMatch(m)) continue;
           const rawValue = m.role === 'crypto' ? coin : valueForRole(m.role, coinData);
           let newText;
           if (m.namePrefix !== undefined) {
@@ -1354,7 +1486,12 @@
               ? rawValue.slice(1) : rawValue;
             newText = m.currentText.replace(m.matchedVar, val);
           } else {
-            newText = rawValue;
+            // No explicit token found: preserve surrounding text and replace only
+            // the first numeric segment when possible (e.g. "A$132.22 USD").
+            const partial = m.role === 'crypto'
+              ? null
+              : replaceFirstNumericToken(m.currentText, rawValue);
+            newText = partial ?? rawValue;
           }
           replacements.push({ nodeId: m.nodeId, newText });
         }
@@ -1439,10 +1576,6 @@
       updateRootViews();
     });
 
-    document.getElementById('settings-back').addEventListener('click', () => {
-      closeSettingsIfOpenWithUnsavedHint();
-    });
-
     document.getElementById('settings-save').addEventListener('click', () => {
       const startEl = document.getElementById('settings-start');
       const endEl = document.getElementById('settings-end');
@@ -1492,6 +1625,11 @@
               ? msg.previewBatchSize
               : msg.textTargetCount,
         };
+        // Selection changed in Figma: scanned price cards are stale now.
+        // Force re-scan before allowing another "Update text".
+        priceCards = null;
+        cardCoinAssignments = [];
+        renderPriceScanResults(priceLoaded);
         setHintFromContext(msg);
         syncPrimaryActionLabel();
         renderPreview();
@@ -1504,6 +1642,7 @@
         const cmcEl = document.getElementById('settings-cmc-key');
         if (cgEl) cgEl.value = coingeckoKey;
         if (cmcEl) cmcEl.value = cmcKey;
+        updatePriceBanner();
         return;
       }
       if (msg.type === 'price-layer-scan') {

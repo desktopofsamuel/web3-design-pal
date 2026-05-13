@@ -286,8 +286,18 @@ function matchesInNode(
   for (const t of collectTextTargets([node])) {
     const name = t.name;
     const chars = t.characters;
+    const charsUpper = chars.trim().toUpperCase();
+    const isKnownLiteralTicker = knownTickerSet.has(charsUpper);
     if (name === cryptoVar || chars === cryptoVar)
-      result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'crypto' });
+      result.push({
+        nodeId: t.id,
+        layerName: name,
+        currentText: chars,
+        role: 'crypto',
+        // If layer name is placeholder but content is a known ticker (e.g. name="{crypto}", text="BTC"),
+        // preserve the literal ticker and only update sibling data layers.
+        isLiteral: chars !== cryptoVar && isKnownLiteralTicker ? true : undefined,
+      });
     else if (name === priceVar || chars === priceVar)
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'price' });
     else if (name === changeVar || chars === changeVar)
@@ -318,7 +328,7 @@ function matchesInNode(
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'mcap', namePrefix: name.replace(mcapVar, '') });
     else if (name.includes(cryptoVar))
       result.push({ nodeId: t.id, layerName: name, currentText: chars, role: 'crypto', namePrefix: name.replace(cryptoVar, '') });
-    else if (knownTickerSet.has(chars)) {
+    else if (isKnownLiteralTicker) {
       // Auto-detect: text content is a known ticker symbol (e.g. "BTC", "ETH").
       // Mark as literal so the apply step preserves the text and only updates
       // adjacent data layers ({price}, {change}, etc.) for that coin.
