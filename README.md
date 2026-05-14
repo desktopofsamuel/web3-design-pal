@@ -4,10 +4,10 @@ A Figma plugin for Web3 mock content: generate wallet addresses and update token
 
 ## Capabilities
 
-### 1) Wallet address generator
+### 1) Address generator (Address tab)
 
 - Generate mock addresses for Ethereum, Bitcoin, Solana, and Ripple.
-- Preview values in the plugin panel and use **Refresh** to roll new ones.
+- Preview values in the plugin panel and use **Refresh** (icon on the preview) to roll new ones.
 - Optional truncation with configurable start/end character rules.
 - **Create / Apply** behavior adapts to selection:
   - No selection -> create one text layer on page.
@@ -16,10 +16,11 @@ A Figma plugin for Web3 mock content: generate wallet addresses and update token
 
 Addresses are format-styled for design only (not real, not safe for production wallets).
 
-### 2) New: Price layer updater
+### 2) Price layer updater (Price tab)
 
 Use the **Price** tab to populate token cards with live market values.
 
+- **CoinGecko API key** — Set your key in **Settings** before **Refresh**; the UI shows a persistent callout until a key is saved.
 - Scan selected nodes for variable tokens:
   - `{crypto}` ticker
   - `{price}` USD price
@@ -28,8 +29,14 @@ Use the **Price** tab to populate token cards with live market values.
   - `{mcap}` market cap
 - Supports token matches in layer names or text content (including embedded tokens like `A${price}`).
 - Auto-detects literal ticker text (for example `BTC`) and preserves that ticker while updating sibling data layers.
-- Refreshes prices from CoinGecko (or CoinMarketCap when key is available), then applies replacements to matched text layers.
+- Refreshes prices from CoinGecko, then applies replacements to matched text layers.
+- Comma-separated coin list; duplicate symbols are rejected.
 - Price formatting controls live in **Settings** (decimals, currency symbol, comma grouping).
+- Changing Figma selection clears the last scan until you **Scan** again, so **Update text** stays accurate.
+
+### 3) TxID tab
+
+Coming soon — reserved for future transaction-ID tools.
 
 ## Platform support
 
@@ -45,7 +52,7 @@ Requirements:
 
 ## Development
 
-Main thread logic is in `code.ts` (compiled to `code.js`). UI is in `ui.html`.
+Main thread logic lives under `src/` (entry `code.ts`); **`pnpm run build`** bundles everything to `code.js` via esbuild. UI is in `ui.html`.
 
 ```bash
 pnpm install
@@ -54,7 +61,7 @@ pnpm run build
 
 Helpful commands:
 
-- `pnpm run build` -> compile plugin code.
+- `pnpm run build` -> bundle plugin main thread to `code.js`.
 - `pnpm run typecheck` -> TypeScript checks.
 - `pnpm run lint` -> lint project files.
 

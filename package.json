@@ -4,22 +4,26 @@
   "description": "Your Figma Plugin",
   "main": "code.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "esbuild code.ts --bundle --outfile=code.js --format=iife --platform=neutral --target=es2017",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
-    "watch": "npm run build -- --watch",
+    "watch": "esbuild code.ts --bundle --outfile=code.js --format=iife --platform=neutral --target=es2017 --watch",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
   "author": "Samuel Wong <desktopofsamuel@gmail.com> (https://desktopofsamuel.com)",
   "license": "MIT",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
   "devDependencies": {
     "@figma/eslint-plugin-figma-plugins": "*",
     "@figma/plugin-typings": "*",
     "@playwright/test": "1.49.1",
     "@typescript-eslint/eslint-plugin": "^6.12.0",
     "@typescript-eslint/parser": "^6.12.0",
+    "esbuild": "^0.25.0",
     "eslint": "^8.54.0",
     "serve": "14.2.4",
     "typescript": "^5.3.2",
