@@ -323,13 +323,13 @@
     .settings-two-col .settings-field {
       margin-bottom: 0;
     }
-    .settings-field label {
+    .settings-field label:not(.truncate-row) {
       display: block;
       font-size: 10px;
       color: rgba(0, 0, 0, 0.5);
       margin-bottom: 4px;
     }
-    .settings-field input {
+    .settings-field input:not([type="checkbox"]) {
       width: 100%;
       padding: 8px 10px;
       font: inherit;
@@ -350,7 +350,7 @@
       flex-wrap: wrap;
     }
     .settings-checkbox-row {
-      margin: 0;
+      margin: 4px 0 0;
       display: flex;
       flex-wrap: wrap;
       gap: 18px;
@@ -694,11 +694,9 @@
           <label for="price-decimals">Decimal places</label>
           <input type="number" id="price-decimals" value="2" min="0" max="8" />
         </div>
-        <div class="settings-field">
-          <div class="settings-checkbox-row">
-            <label class="truncate-row"><input type="checkbox" id="price-show-symbol" checked /> <span>$ symbol</span></label>
-            <label class="truncate-row"><input type="checkbox" id="price-show-commas" checked /> <span>Commas</span></label>
-          </div>
+        <div class="settings-checkbox-row">
+          <label class="truncate-row"><input type="checkbox" id="price-show-symbol" checked /> <span>$ symbol</span></label>
+          <label class="truncate-row"><input type="checkbox" id="price-show-commas" checked /> <span>Commas</span></label>
         </div>
       </div>
     </div>
