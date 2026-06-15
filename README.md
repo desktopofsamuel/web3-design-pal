@@ -23,13 +23,17 @@ Use the **Price** tab to populate token cards with live market values.
 - **CoinGecko API key** — Set your key in **Settings** before **Refresh**; the UI shows a persistent callout until a key is saved.
 - Scan selected nodes for variable tokens:
   - `{crypto}` ticker
-  - `{price}` USD price
+  - `{price}` price
   - `{change}` 24h change
   - `{volume}` 24h volume
   - `{mcap}` market cap
 - Supports token matches in layer names or text content (including embedded tokens like `A${price}`).
+- **Figma GRID tables** — Selecting a whole grid/table splits matches into **one card per row** (by grid row index or visual Y position), so each coin row updates independently.
+- **Fiat pair labels** — Detects text like `BTC/AUD`, `BTC / AUD`, or `BTCAUD` and applies the matching fiat quote (AUD, EUR, GBP, and others) while preserving the pair label.
 - Auto-detects literal ticker text (for example `BTC`) and preserves that ticker while updating sibling data layers.
-- Refreshes prices from CoinGecko, then applies replacements to matched text layers.
+- Re-apply safe — Updating text again replaces numeric values without duplicating unit suffixes (for example `$33.92B` stays one `B`, not `BB`).
+- Refreshes prices from CoinGecko (or CoinMarketCap if configured), including multi-currency quotes, then applies replacements to matched text layers.
+- **Coin list** — Default pool of 50 popular tokens (including ETH); your edited list is saved and restored when you reopen the plugin.
 - Comma-separated coin list; duplicate symbols are rejected.
 - Price formatting controls live in **Settings** (decimals, currency symbol, comma grouping).
 - Changing Figma selection clears the last scan until you **Scan** again, so **Update text** stays accurate.
@@ -67,6 +71,8 @@ Helpful commands:
 
 Load in Figma via **Plugins -> Development -> Import plugin from manifest...** and select this repo's `manifest.json`.
 
+Community icon (128×128): upload `assets/icon.png` when publishing — Figma does not support an `icon` field in [manifest.json](https://developers.figma.com/docs/plugins/manifest/). The logo also appears in the plugin UI header.
+
 ## UI tests (Playwright)
 
 The suite serves `ui.html` and validates DOM behavior plus plugin `postMessage` contracts.
@@ -76,3 +82,7 @@ pnpm install
 pnpm exec playwright install chromium
 pnpm run test:e2e
 ```
+
+## Support
+
+If this plugin saves you time, [Buy me a coffee](https://buymeacoffee.com/desktopofsamuel).

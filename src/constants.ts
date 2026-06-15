@@ -1,6 +1,6 @@
 export const DEFAULT_TRUNCATE_START = 6;
 export const DEFAULT_TRUNCATE_END = 4;
-export const FOOTER_BUY_ME_COFFEE_URL = 'https://example.com/buy-me-coffee';
+export const FOOTER_BUY_ME_COFFEE_URL = 'https://buymeacoffee.com/desktopofsamuel';
 export const FOOTER_PROFILE_URL = 'https://desktopofsamuel.com/?ref=web3-design-pal';
 
 /** Persisted via figma.clientStorage — see https://developers.figma.com/docs/plugins/api/figma-clientStorage/ */

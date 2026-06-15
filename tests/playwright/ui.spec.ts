@@ -4,7 +4,7 @@ import { DEFAULT_PRICE_COINS, DEFAULT_PRICE_COINS_TEXT } from '../../src/constan
 const STORAGE_KEY = 'web3dpal_truncate_rules';
 const PRICE_CACHE_KEY = 'web3dpal_price_cache';
 const PRICE_COINS_KEY = 'web3dpal_price_coins';
-const BUY_ME_COFFEE_URL = 'https://example.com/buy-me-coffee';
+const BUY_ME_COFFEE_URL = 'https://buymeacoffee.com/desktopofsamuel';
 const PROFILE_URL = 'https://desktopofsamuel.com';
 const ethLine = /^0x[a-f0-9]{40}$/;
 /** Base58 alphabet (no 0 O I l) */
