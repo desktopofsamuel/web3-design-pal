@@ -44,23 +44,8 @@
       align-items: center;
       justify-content: space-between;
       padding: 0 8px 0 10px;
-      gap: 8px;
       z-index: 10;
       flex-shrink: 0;
-    }
-    .top-bar-start {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      flex: 1;
-    }
-    .plugin-logo {
-      width: 24px;
-      height: 24px;
-      border-radius: 6px;
-      flex-shrink: 0;
-      display: block;
     }
     .segment {
       display: flex;
@@ -598,13 +583,10 @@
 <body>
   <div class="root">
     <header class="top-bar">
-      <div class="top-bar-start">
-        <img class="plugin-logo" src="assets/icon.png" width="24" height="24" alt="" />
-        <div class="segment" role="tablist" aria-label="Mode">
-          <button type="button" class="segment-tab" role="tab" id="tab-wallet" aria-selected="true" aria-controls="view-wallet">Address</button>
-          <button type="button" class="segment-tab" role="tab" id="tab-price" aria-selected="false" aria-controls="view-price">Price</button>
-          <button type="button" class="segment-tab" role="tab" id="tab-txid" aria-selected="false" aria-controls="view-txid">TxID</button>
-        </div>
+      <div class="segment" role="tablist" aria-label="Mode">
+        <button type="button" class="segment-tab" role="tab" id="tab-wallet" aria-selected="true" aria-controls="view-wallet">Address</button>
+        <button type="button" class="segment-tab" role="tab" id="tab-price" aria-selected="false" aria-controls="view-price">Price</button>
+        <button type="button" class="segment-tab" role="tab" id="tab-txid" aria-selected="false" aria-controls="view-txid">TxID</button>
       </div>
       <button type="button" class="icon-btn" id="btn-settings" aria-label="Settings">
         <!-- Lucide "settings" (MIT) -->

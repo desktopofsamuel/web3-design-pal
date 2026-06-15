@@ -71,7 +71,7 @@ Helpful commands:
 
 Load in Figma via **Plugins -> Development -> Import plugin from manifest...** and select this repo's `manifest.json`.
 
-Community icon (128×128): upload `assets/icon.png` when publishing — Figma does not support an `icon` field in [manifest.json](https://developers.figma.com/docs/plugins/manifest/). The logo also appears in the plugin UI header.
+Community icon (128×128): upload `assets/icon.png` when publishing — Figma does not support an `icon` field in [manifest.json](https://developers.figma.com/docs/plugins/manifest/).
 
 ## UI tests (Playwright)
 

@@ -1,6 +1,6 @@
 {
   "name": "Web3-Design-Pal",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "description": "Your Figma Plugin",
   "main": "code.js",
   "scripts": {
