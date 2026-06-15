@@ -58,6 +58,8 @@ export type CancelMessage = { type: 'cancel' };
 
 export type GetApiKeysMessage = { type: 'get-api-keys' };
 export type SaveApiKeysMessage = { type: 'save-api-keys'; coingeckoKey: string; cmcKey: string };
+export type GetPriceCoinsMessage = { type: 'get-price-coins' };
+export type SavePriceCoinsMessage = { type: 'save-price-coins'; coins: string };
 export type FetchPricesMessage = { type: 'fetch-prices'; symbols: string[] };
 export type ScanPriceLayersMessage = {
   type: 'scan-price-layers';
@@ -76,11 +78,27 @@ export type ApplyPriceMessage = {
 
 export type ApiKeysToUIMessage = { type: 'api-keys'; coingeckoKey: string; cmcKey: string };
 
+export type PriceCoinsToUIMessage = { type: 'price-coins'; coins: string };
+
+/** Per-fiat quote slice (keys lowercase: aud, eur, …). USD is always on the root `CoinPriceData` fields. */
+export type VsCurrencyQuotes = Record<
+  string,
+  {
+    price: number | null;
+    change: number | null;
+    volume: number | null;
+    mcap: number | null;
+  }
+>;
+
 export type CoinPriceData = {
+  /** Primary quote (USD). */
   price: number | null;
   change: number | null;
   volume: number | null;
   mcap: number | null;
+  /** Optional non-USD quotes from the same fetch (keys lowercase). */
+  vs?: VsCurrencyQuotes;
 };
 
 export type PricesResultMessage = {
@@ -112,6 +130,14 @@ export type PriceLayerMatch = {
    * The apply step prepends this to the formatted value.
    */
   namePrefix?: string;
+  /**
+   * When text is a pair like BTC/AUD, symbol used for price lookup (e.g. "BTC").
+   */
+  quoteSymbol?: string;
+  /**
+   * Lowercase fiat for quote selection (e.g. "aud"). Omitted → UI uses USD root fields.
+   */
+  vsCurrency?: string;
 };
 
 export type PriceCard = {
@@ -133,6 +159,8 @@ export type PluginMessageFromUI =
   | ResizeUiMessage
   | GetApiKeysMessage
   | SaveApiKeysMessage
+  | GetPriceCoinsMessage
+  | SavePriceCoinsMessage
   | FetchPricesMessage
   | ScanPriceLayersMessage
   | ApplyPriceMessage;

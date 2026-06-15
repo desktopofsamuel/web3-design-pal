@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { DEFAULT_PRICE_COINS, DEFAULT_PRICE_COINS_TEXT } from '../../src/constants';
 
 const STORAGE_KEY = 'web3dpal_truncate_rules';
 const PRICE_CACHE_KEY = 'web3dpal_price_cache';
+const PRICE_COINS_KEY = 'web3dpal_price_coins';
 const BUY_ME_COFFEE_URL = 'https://example.com/buy-me-coffee';
 const PROFILE_URL = 'https://desktopofsamuel.com';
 const ethLine = /^0x[a-f0-9]{40}$/;
@@ -9,31 +11,91 @@ const ethLine = /^0x[a-f0-9]{40}$/;
 const solPattern = /^[1-9A-HJ-NP-Za-km-z]{44}$/;
 
 // ─── Price tab mock data (real CoinGecko response, 2024-04) ──────────────────
-const MOCK_COINS: Record<string, { price: number; change: number; volume: number; mcap: number }> =
+const MOCK_COINS: Record<string, { price: number; change: number; volume: number; mcap: number; vs?: Record<string, { price: number; change: number; volume: number; mcap: number }> }> =
   {
     ETH: {
       price: 2279.4,
       change: -1.7090294198921991,
       volume: 13619093866.416811,
       mcap: 275124785372.0594,
+      vs: {
+        aud: {
+          price: 4730.12,
+          change: -1.1,
+          volume: 2.1e9,
+          mcap: 5.6e10,
+        },
+      },
     },
     BTC: {
       price: 76511,
       change: -1.6369118028497176,
       volume: 33915634645.395718,
       mcap: 1532118888510.001,
+      vs: {
+        aud: {
+          price: 118234.56,
+          change: -1.2,
+          volume: 5.1e10,
+          mcap: 2.35e12,
+        },
+      },
     },
     SOL: {
       price: 83.71,
       change: -1.6606195765535383,
       volume: 2891995107.941362,
       mcap: 48236128508.15029,
+      vs: {
+        aud: {
+          price: 116.25,
+          change: -1.3,
+          volume: 1.9e8,
+          mcap: 4.9e9,
+        },
+      },
     },
     XRP: {
       price: 1.39,
       change: -1.9317122850842732,
       volume: 1849986074.768185,
       mcap: 85569581780.77618,
+      vs: {
+        aud: {
+          price: 1.43,
+          change: -0.4,
+          volume: 1.1e8,
+          mcap: 7.2e9,
+        },
+      },
+    },
+    USDT: {
+      price: 1.0,
+      change: 0.01,
+      volume: 4.5e10,
+      mcap: 9.5e10,
+      vs: {
+        aud: {
+          price: 1.51,
+          change: 0,
+          volume: 3.3e9,
+          mcap: 1.1e10,
+        },
+      },
+    },
+    USDC: {
+      price: 1.0,
+      change: 0,
+      volume: 3.2e9,
+      mcap: 3.2e10,
+      vs: {
+        aud: {
+          price: 1.4012,
+          change: 0,
+          volume: 2.1e8,
+          mcap: 1.05e9,
+        },
+      },
     },
     BNB: {
       price: 622.29,
@@ -42,6 +104,29 @@ const MOCK_COINS: Record<string, { price: number; change: number; volume: number
       mcap: 83868252775.19609,
     },
   };
+
+/**
+ * Figma GRID table: two data rows in one frame, each with {crypto}/{price}/{change}.
+ * Scan groups by row so each grid row becomes its own card (not one merged card).
+ */
+const MOCK_CARDS_FIGMA_GRID_TABLE = [
+  {
+    cardName: 'Row 1',
+    matches: [
+      { nodeId: 'grid-r1-c', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+      { nodeId: 'grid-r1-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+      { nodeId: 'grid-r1-ch', layerName: '{change}', currentText: '{change}', role: 'change' },
+    ],
+  },
+  {
+    cardName: 'Row 2',
+    matches: [
+      { nodeId: 'grid-r2-c', layerName: '{crypto}', currentText: '{crypto}', role: 'crypto' },
+      { nodeId: 'grid-r2-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+      { nodeId: 'grid-r2-ch', layerName: '{change}', currentText: '{change}', role: 'change' },
+    ],
+  },
+];
 
 /** Reusable mock cards — two token cards each with a {crypto} + {price} layer. */
 const MOCK_CARDS = [
@@ -85,6 +170,160 @@ const MOCK_CARDS_AUTO_DETECT = [
   },
 ];
 
+/** Simulates scan output for BTC/AUD variants (same as plugin would emit). */
+const MOCK_CARDS_FIAT_PAIR_VARIANTS = [
+  {
+    cardName: 'Slash',
+    matches: [
+      {
+        nodeId: 'fp1',
+        layerName: 'pair',
+        currentText: 'BTC/AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'BTC',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fp1p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'Spaced',
+    matches: [
+      {
+        nodeId: 'fp2',
+        layerName: 'pair',
+        currentText: 'BTC / AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'BTC',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fp2p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'Concat',
+    matches: [
+      {
+        nodeId: 'fp3',
+        layerName: 'pair',
+        currentText: 'BTCAUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'BTC',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fp3p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'UsdOnly',
+    matches: [
+      { nodeId: 'fp4', layerName: 'ticker', currentText: 'BTC', role: 'crypto', isLiteral: true },
+      { nodeId: 'fp4p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+];
+
+/**
+ * Crypto Landing Page–style rows: pair label + sibling text layer named `{price}`
+ * (content `{price}`), as after renaming the bid cell for plugin updates.
+ * Spacing variants match the Figma file (slash with spaces, space after slash only, tight XRP/AUD).
+ */
+const MOCK_CARDS_FIGMA_LANDING_PAIR_ROWS = [
+  {
+    cardName: 'BTC / AUD',
+    matches: [
+      {
+        nodeId: 'fl-btc-c',
+        layerName: 'pair',
+        currentText: 'BTC / AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'BTC',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fl-btc-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'ETH / AUD',
+    matches: [
+      {
+        nodeId: 'fl-eth-c',
+        layerName: 'pair',
+        currentText: 'ETH / AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'ETH',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fl-eth-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'USDT/ AUD',
+    matches: [
+      {
+        nodeId: 'fl-usdt-c',
+        layerName: 'pair',
+        currentText: 'USDT/ AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'USDT',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fl-usdt-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'USDC/ AUD',
+    matches: [
+      {
+        nodeId: 'fl-usdc-c',
+        layerName: 'pair',
+        currentText: 'USDC/ AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'USDC',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fl-usdc-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'SOL / AUD',
+    matches: [
+      {
+        nodeId: 'fl-sol-c',
+        layerName: 'pair',
+        currentText: 'SOL / AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'SOL',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fl-sol-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+  {
+    cardName: 'XRP/AUD',
+    matches: [
+      {
+        nodeId: 'fl-xrp-c',
+        layerName: 'pair',
+        currentText: 'XRP/AUD',
+        role: 'crypto',
+        isLiteral: true,
+        quoteSymbol: 'XRP',
+        vsCurrency: 'aud',
+      },
+      { nodeId: 'fl-xrp-p', layerName: '{price}', currentText: '{price}', role: 'price' },
+    ],
+  },
+];
+
 async function firstPreviewText(page: import('@playwright/test').Page): Promise<string> {
   const line = page.locator('#preview-inner .preview-line').first();
   return (await line.textContent()) ?? '';
@@ -106,14 +345,35 @@ function postSelectionContext(
  */
 async function installFigmaStorageMock(
   page: import('@playwright/test').Page,
-  coins: Record<string, { price: number; change: number; volume: number; mcap: number }> = {},
+  coins: Record<
+    string,
+    {
+      price: number;
+      change: number;
+      volume: number;
+      mcap: number;
+      vs?: Record<string, { price: number; change: number; volume: number; mcap: number }>;
+    }
+  > = {},
 ): Promise<void> {
   await page.addInitScript(
     (cfg: {
       key: string;
+      priceKey: string;
+      priceCoinsKey: string;
+      defaultPriceCoins: string;
       buy: string;
       profile: string;
-      coins: Record<string, { price: number; change: number; volume: number; mcap: number }>;
+      coins: Record<
+        string,
+        {
+          price: number;
+          change: number;
+          volume: number;
+          mcap: number;
+          vs?: Record<string, { price: number; change: number; volume: number; mcap: number }>;
+        }
+      >;
     }) => {
       window.addEventListener('message', (ev: MessageEvent) => {
         const pm = (ev.data as { pluginMessage?: Record<string, unknown> } | undefined)
@@ -191,6 +451,27 @@ async function installFigmaStorageMock(
           }
         }
 
+        if (type === 'get-price-coins') {
+          let coinsText = cfg.defaultPriceCoins;
+          try {
+            const raw = localStorage.getItem(cfg.priceCoinsKey);
+            if (raw && raw.trim()) coinsText = raw.trim();
+          } catch {
+            /* use default */
+          }
+          window.postMessage({ pluginMessage: { type: 'price-coins', coins: coinsText } }, '*');
+        }
+
+        if (type === 'save-price-coins') {
+          const coinsText = typeof pm.coins === 'string' ? pm.coins : cfg.defaultPriceCoins;
+          try {
+            localStorage.setItem(cfg.priceCoinsKey, coinsText);
+          } catch {
+            /* ignore */
+          }
+          window.postMessage({ pluginMessage: { type: 'price-coins', coins: coinsText } }, '*');
+        }
+
         // Respond to fetch-prices with the baked-in mock coin data.
         if (type === 'fetch-prices') {
           window.postMessage(
@@ -213,7 +494,7 @@ async function installFigmaStorageMock(
         } catch (_) {}
       }
     },
-    { key: STORAGE_KEY, priceKey: PRICE_CACHE_KEY, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL, coins },
+    { key: STORAGE_KEY, priceKey: PRICE_CACHE_KEY, priceCoinsKey: PRICE_COINS_KEY, defaultPriceCoins: DEFAULT_PRICE_COINS_TEXT, buy: BUY_ME_COFFEE_URL, profile: PROFILE_URL, coins },
   );
 }
 
@@ -590,6 +871,43 @@ async function postScanResult(
   await page.locator('#price-scan-summary').waitFor({ state: 'visible' });
 }
 
+/** Count trailing K/M/B/T from formatLarge — must stay at 1 after re-apply (regression: no "BB"). */
+function trailingLargeSuffixLength(text: string): number {
+  const m = text.match(/[kKmMbBtT]+$/);
+  return m ? m[0].length : 0;
+}
+
+function assertNoAccumulatedLargeSuffix(text: string): void {
+  expect(trailingLargeSuffixLength(text)).toBeLessThanOrEqual(1);
+  expect(text).not.toMatch(/[kKmMbBtT]{2,}$/);
+}
+
+async function clickApplyPriceAndCapture(
+  page: import('@playwright/test').Page,
+): Promise<Array<{ nodeId: string; newText: string }>> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+    w.__applyPriceCapture = null;
+    window.addEventListener('message', function handler(e: Event) {
+      const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+      if (pm?.type === 'apply-price') {
+        w.__applyPriceCapture = pm;
+        window.removeEventListener('message', handler);
+      }
+    });
+  });
+
+  await page.locator('#price-apply-btn').click();
+
+  const msg = await page.evaluate(
+    () =>
+      (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+        .__applyPriceCapture,
+  );
+  expect(msg).not.toBeNull();
+  return msg!.replacements as Array<{ nodeId: string; newText: string }>;
+}
+
 /**
  * Full happy-path setup: navigate to Price tab, post a scan result, and wait
  * for the apply button to become enabled. Prices are pre-loaded from the
@@ -626,14 +944,34 @@ test.describe('Price tab', () => {
     await expect(page.locator('#view-wallet')).toHaveClass(/view-hidden/);
   });
 
-  test('default coin textarea contains expected coins', async ({ page }) => {
+  test('default coin textarea contains 50 popular tokens including ETH', async ({ page }) => {
     await openPriceTab(page);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('price-coin-input') as HTMLTextAreaElement | null;
+      return el != null && el.value.includes('ETH');
+    });
     const value = await page.locator('#price-coin-input').inputValue();
     const coins = value.split(',').map((s) => s.trim());
-    expect(coins).toContain('AAVE');
+    expect(coins).toContain('ETH');
     expect(coins).toContain('BTC');
     expect(coins).toContain('SOL');
-    expect(coins.length).toBeGreaterThanOrEqual(30);
+    expect(coins.length).toBe(DEFAULT_PRICE_COINS.length);
+  });
+
+  test('coin textarea persists across reload', async ({ page }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('DOGE, SHIB, PEPE');
+    await page.waitForTimeout(400);
+    await page.reload();
+    await openPriceTab(page);
+    await page.waitForFunction(() => {
+      const el = document.getElementById('price-coin-input') as HTMLTextAreaElement | null;
+      return el != null && el.value.includes('DOGE');
+    });
+    const value = await page.locator('#price-coin-input').inputValue();
+    expect(value).toContain('DOGE');
+    expect(value).toContain('SHIB');
+    expect(value).not.toContain('ETH');
   });
 
   test('before any scan, Update text is disabled and no-selection hint is shown', async ({
@@ -1018,6 +1356,63 @@ test.describe('Price tab', () => {
     expect(priceReplacement!.newText).not.toContain('$$');
   });
 
+  test('name prefix A${price}: with BTC / AUD literal, apply keeps single A$ + AUD amount (matches Figma bid style)', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'AUD Bid',
+        matches: [
+          {
+            nodeId: 'apfx1',
+            layerName: 'pair',
+            currentText: 'BTC / AUD',
+            role: 'crypto',
+            isLiteral: true,
+            quoteSymbol: 'BTC',
+            vsCurrency: 'aud',
+          },
+          {
+            nodeId: 'apfx2',
+            layerName: 'A${price}',
+            currentText: 'A$103,503',
+            role: 'price',
+            namePrefix: 'A$',
+          },
+        ],
+      },
+    ] as typeof MOCK_CARDS);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () => (window as unknown as { __applyPriceCapture: Record<string, unknown> | null }).__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const priceReplacement = (msg!.replacements as Array<{ nodeId: string; newText: string }>).find(
+      (r) => r.nodeId === 'apfx2',
+    );
+    expect(priceReplacement).toBeDefined();
+    expect(priceReplacement!.newText).toMatch(/^A\$/);
+    expect(priceReplacement!.newText).not.toMatch(/^A\$A\$/);
+    expect(priceReplacement!.newText).toMatch(/118,?234/);
+  });
+
   test('substring match: layer with "A${price}" content is treated as a full card', async ({
     page,
   }) => {
@@ -1154,6 +1549,94 @@ test.describe('Price tab', () => {
     // Content was already a number — name match must have detected it, new price written
     expect(priceReplacement!.newText).not.toBe('$999.99');
     expect(priceReplacement!.newText.length).toBeGreaterThan(0);
+  });
+
+  test('re-apply: name={volume} content=$33.92B — does not duplicate B suffix', async ({ page }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'vol1', layerName: 'BTC', currentText: 'BTC', role: 'crypto', isLiteral: true },
+          { nodeId: 'vol2', layerName: '{volume}', currentText: '$33.92B', role: 'volume' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    const replacements = await clickApplyPriceAndCapture(page);
+    const volumeReplacement = replacements.find((r) => r.nodeId === 'vol2');
+    expect(volumeReplacement).toBeDefined();
+    assertNoAccumulatedLargeSuffix(volumeReplacement!.newText);
+  });
+
+  test('re-apply twice: volume with corrupted BB suffix self-heals to single B', async ({ page }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'Row',
+        matches: [
+          { nodeId: 'vol3', layerName: 'BTC', currentText: 'BTC', role: 'crypto', isLiteral: true },
+          { nodeId: 'vol4', layerName: '{volume}', currentText: '$33.92BB', role: 'volume' },
+        ],
+      },
+    ]);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    const replacements = await clickApplyPriceAndCapture(page);
+    const volumeReplacement = replacements.find((r) => r.nodeId === 'vol4');
+    expect(volumeReplacement).toBeDefined();
+    assertNoAccumulatedLargeSuffix(volumeReplacement!.newText);
+  });
+
+  test('regression: volume/mcap suffix does not accumulate over repeated scan → apply cycles', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+
+    type ScanMatch = (typeof MOCK_CARDS)[number]['matches'][number];
+    const cryptoMatch: ScanMatch = {
+      nodeId: 'volr-c',
+      layerName: 'BTC',
+      currentText: 'BTC',
+      role: 'crypto',
+      isLiteral: true,
+    };
+
+    let volumeText = '{volume}';
+    let mcapText = '{mcap}';
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await postScanResult(page, [
+        {
+          cardName: 'Row',
+          matches: [
+            cryptoMatch,
+            { nodeId: 'volr-v', layerName: '{volume}', currentText: volumeText, role: 'volume' },
+            { nodeId: 'volr-m', layerName: '{mcap}', currentText: mcapText, role: 'mcap' },
+          ],
+        },
+      ]);
+      await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+      const replacements = await clickApplyPriceAndCapture(page);
+      const vol = replacements.find((r) => r.nodeId === 'volr-v');
+      const mcap = replacements.find((r) => r.nodeId === 'volr-m');
+      expect(vol, `cycle ${cycle + 1} volume`).toBeDefined();
+      expect(mcap, `cycle ${cycle + 1} mcap`).toBeDefined();
+
+      assertNoAccumulatedLargeSuffix(vol!.newText);
+      assertNoAccumulatedLargeSuffix(mcap!.newText);
+
+      volumeText = vol!.newText;
+      mcapText = mcap!.newText;
+    }
+
+    expect(trailingLargeSuffixLength(volumeText)).toBe(1);
+    expect(trailingLargeSuffixLength(mcapText)).toBe(1);
   });
 
   // ── Both name and content contain the token ─────────────────────────────────
@@ -1451,6 +1934,267 @@ test.describe('Price tab', () => {
     // ETH card price (b2) should use ETH data ($2,279)
     const ethPrice = replacements.find((r) => r.nodeId === 'b2');
     expect(ethPrice?.newText).toContain('2'); // ETH is ~$2k range
+  });
+
+  test('fiat pairs: BTC/AUD, BTC / AUD, and BTCAUD use AUD quote; plain BTC uses USD', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await postScanResult(page, MOCK_CARDS_FIAT_PAIR_VARIANTS as typeof MOCK_CARDS);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+
+    for (const id of ['fp1p', 'fp2p', 'fp3p']) {
+      const r = replacements.find((x) => x.nodeId === id);
+      expect(r, id).toBeDefined();
+      expect(r!.newText).toMatch(/A\$/);
+      expect(r!.newText).toContain('118');
+    }
+    const usdP = replacements.find((r) => r.nodeId === 'fp4p');
+    expect(usdP?.newText).toMatch(/^\$/);
+    expect(usdP?.newText).toContain('76');
+    expect(usdP?.newText).not.toContain('118');
+  });
+
+  test('fiat pair: missing AUD slice in cache falls back to USD price formatting', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          pluginMessage: {
+            type: 'prices-result',
+            source: 'coingecko',
+            coins: {
+              BTC: { price: 99123.45, change: -1.1, volume: 3.3e10, mcap: 1.5e12 },
+            },
+          },
+        },
+        '*',
+      );
+    });
+
+    await postScanResult(page, [
+      {
+        cardName: 'AudMissing',
+        matches: [
+          {
+            nodeId: 'fm1',
+            layerName: 'pair',
+            currentText: 'BTC/AUD',
+            role: 'crypto',
+            isLiteral: true,
+            quoteSymbol: 'BTC',
+            vsCurrency: 'aud',
+          },
+          { nodeId: 'fm1p', layerName: '{price}', currentText: '{price}', role: 'price' },
+        ],
+      },
+    ] as typeof MOCK_CARDS);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const r = replacements.find((x) => x.nodeId === 'fm1p');
+    expect(r?.newText).toMatch(/^\$/);
+    expect(r?.newText).toMatch(/99,123/);
+    expect(r?.newText).not.toMatch(/A\$/);
+  });
+
+  test('Figma grid table: two placeholder rows scan as separate cards and get distinct pool coins', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('ETH,BTC,SOL');
+    await postScanResult(page, MOCK_CARDS_FIGMA_GRID_TABLE as typeof MOCK_CARDS);
+    await expect(page.locator('#price-scan-summary')).toContainText('2 cards');
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+    const row1Crypto = replacements.find((r) => r.nodeId === 'grid-r1-c');
+    const row2Crypto = replacements.find((r) => r.nodeId === 'grid-r2-c');
+    const row1Price = replacements.find((r) => r.nodeId === 'grid-r1-p');
+    const row2Price = replacements.find((r) => r.nodeId === 'grid-r2-p');
+
+    expect(row1Crypto).toBeDefined();
+    expect(row2Crypto).toBeDefined();
+    expect(row1Crypto!.newText).not.toBe(row2Crypto!.newText);
+    expect(row1Price!.newText).not.toBe(row2Price!.newText);
+    expect(row1Price!.newText).not.toBe('—');
+    expect(row2Price!.newText).not.toBe('—');
+  });
+
+  test('Figma landing table: AUD pair rows with {price} layer (all slash spacing styles)', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC,ETH,USDT,USDC,SOL,XRP');
+    await postScanResult(page, MOCK_CARDS_FIGMA_LANDING_PAIR_ROWS as typeof MOCK_CARDS);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+
+    expect(msg).not.toBeNull();
+    const replacements = msg!.replacements as Array<{ nodeId: string; newText: string }>;
+
+    const cases: Array<{ nodeId: string; audPattern: RegExp }> = [
+      { nodeId: 'fl-btc-p', audPattern: /118,?234/ },
+      { nodeId: 'fl-eth-p', audPattern: /4,?730/ },
+      { nodeId: 'fl-usdt-p', audPattern: /1\.51/ },
+      { nodeId: 'fl-usdc-p', audPattern: /1\.40/ },
+      { nodeId: 'fl-sol-p', audPattern: /116\.25/ },
+      { nodeId: 'fl-xrp-p', audPattern: /1\.43/ },
+    ];
+
+    for (const { nodeId, audPattern } of cases) {
+      const r = replacements.find((x) => x.nodeId === nodeId);
+      expect(r, nodeId).toBeDefined();
+      expect(r!.newText, nodeId).toMatch(/A\$/);
+      expect(r!.newText, nodeId).toMatch(audPattern);
+    }
+
+    for (const id of [
+      'fl-btc-c',
+      'fl-eth-c',
+      'fl-usdt-c',
+      'fl-usdc-c',
+      'fl-sol-c',
+      'fl-xrp-c',
+    ]) {
+      expect(replacements.find((x) => x.nodeId === id), id).toBeUndefined();
+    }
+  });
+
+  test('Figma-style row: layer named {price} with static A$ bid text replaces numeric token with AUD quote', async ({
+    page,
+  }) => {
+    await openPriceTab(page);
+    await page.locator('#price-coin-input').fill('BTC');
+    await postScanResult(page, [
+      {
+        cardName: 'BidRenamed',
+        matches: [
+          {
+            nodeId: 'fl2-btc-c',
+            layerName: 'pair',
+            currentText: 'BTC / AUD',
+            role: 'crypto',
+            isLiteral: true,
+            quoteSymbol: 'BTC',
+            vsCurrency: 'aud',
+          },
+          {
+            nodeId: 'fl2-btc-p',
+            layerName: '{price}',
+            currentText: 'A$103,503',
+            role: 'price',
+          },
+        ],
+      },
+    ] as typeof MOCK_CARDS);
+    await page.locator('#price-apply-btn:not([disabled])').waitFor({ timeout: 5000 });
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __applyPriceCapture: Record<string, unknown> | null };
+      w.__applyPriceCapture = null;
+      window.addEventListener('message', function handler(e: Event) {
+        const pm = (e as MessageEvent).data?.pluginMessage as Record<string, unknown> | undefined;
+        if (pm?.type === 'apply-price') {
+          w.__applyPriceCapture = pm;
+          window.removeEventListener('message', handler);
+        }
+      });
+    });
+
+    await page.locator('#price-apply-btn').click();
+    const msg = await page.evaluate(
+      () =>
+        (window as unknown as { __applyPriceCapture: Record<string, unknown> | null })
+          .__applyPriceCapture,
+    );
+    expect(msg).not.toBeNull();
+    const r = (msg!.replacements as Array<{ nodeId: string; newText: string }>).find(
+      (x) => x.nodeId === 'fl2-btc-p',
+    );
+    expect(r?.newText).toMatch(/^A\$/);
+    expect(r?.newText).toMatch(/118,?234/);
   });
 
   test('bug repro: name={crypto} with literal BTC content should preserve ticker and only update price', async ({

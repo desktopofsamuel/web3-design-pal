@@ -3,12 +3,14 @@ import {
   CMC_KEY_STORAGE_KEY,
   FOOTER_BUY_ME_COFFEE_URL,
   FOOTER_PROFILE_URL,
+  PRICE_COINS_STORAGE_KEY,
   TRUNCATE_RULES_STORAGE_KEY,
 } from './constants';
-import { normalizeStoredTruncateRules } from './storage';
+import { normalizeStoredPriceCoins, normalizeStoredTruncateRules } from './storage';
 import type {
   ApiKeysToUIMessage,
   FooterLinksToUIMessage,
+  PriceCoinsToUIMessage,
   TruncateRulesToUIMessage,
 } from './types';
 
@@ -36,4 +38,12 @@ export async function pushApiKeysToUI(): Promise<void> {
     coingeckoKey: typeof cg === 'string' ? cg : '',
     cmcKey: typeof cmc === 'string' ? cmc : '',
   } satisfies ApiKeysToUIMessage);
+}
+
+export async function pushPriceCoinsToUI(): Promise<void> {
+  const stored = await figma.clientStorage.getAsync(PRICE_COINS_STORAGE_KEY);
+  figma.ui.postMessage({
+    type: 'price-coins',
+    coins: normalizeStoredPriceCoins(stored),
+  } satisfies PriceCoinsToUIMessage);
 }

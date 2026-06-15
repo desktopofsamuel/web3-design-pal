@@ -1,4 +1,4 @@
-import { DEFAULT_TRUNCATE_END, DEFAULT_TRUNCATE_START } from './constants';
+import { DEFAULT_TRUNCATE_END, DEFAULT_TRUNCATE_START, DEFAULT_PRICE_COINS_TEXT } from './constants';
 import type { TruncateRulesPayload } from './types';
 
 export function normalizeStoredTruncateRules(raw: unknown): TruncateRulesPayload {
@@ -17,4 +17,9 @@ export function normalizeStoredTruncateRules(raw: unknown): TruncateRulesPayload
       ? Math.max(0, Math.min(64, Math.floor(e)))
       : DEFAULT_TRUNCATE_END;
   return { start, end };
+}
+
+export function normalizeStoredPriceCoins(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  return DEFAULT_PRICE_COINS_TEXT;
 }

@@ -1,20 +1,22 @@
 import {
   COINGECKO_KEY_STORAGE_KEY,
   CMC_KEY_STORAGE_KEY,
+  PRICE_COINS_STORAGE_KEY,
   TRUNCATE_RULES_STORAGE_KEY,
 } from './constants';
 import { applyPriceReplacements } from './prices/apply';
 import { fetchPrices } from './prices/fetch';
 import { scanPriceLayers } from './prices/scan';
 import { isApplySupportedEditor, pushSelectionContext } from './selection';
-import { normalizeStoredTruncateRules } from './storage';
+import { normalizeStoredPriceCoins, normalizeStoredTruncateRules } from './storage';
 import type {
   ApiKeysToUIMessage,
   PluginMessageFromUI,
+  PriceCoinsToUIMessage,
   PricesResultMessage,
   TruncateRulesToUIMessage,
 } from './types';
-import { pushApiKeysToUI, pushFooterLinksToUI, pushTruncateRulesToUI } from './ui';
+import { pushApiKeysToUI, pushFooterLinksToUI, pushPriceCoinsToUI, pushTruncateRulesToUI } from './ui';
 import { applyWalletText } from './wallet';
 
 figma.showUI(__html__, { width: 320, height: 560 });
@@ -69,6 +71,16 @@ figma.ui.onmessage = async (msg: PluginMessageFromUI) => {
     figma.ui.postMessage({ type: 'api-keys', coingeckoKey: cgKey, cmcKey } satisfies ApiKeysToUIMessage);
     return;
   }
+  if (msg.type === 'get-price-coins') {
+    await pushPriceCoinsToUI();
+    return;
+  }
+  if (msg.type === 'save-price-coins') {
+    const coins = normalizeStoredPriceCoins(msg.coins);
+    await figma.clientStorage.setAsync(PRICE_COINS_STORAGE_KEY, coins);
+    figma.ui.postMessage({ type: 'price-coins', coins } satisfies PriceCoinsToUIMessage);
+    return;
+  }
   if (msg.type === 'fetch-prices') {
     try {
       await fetchPrices(msg.symbols);
@@ -103,3 +115,4 @@ pushSelectionContext();
 void pushTruncateRulesToUI();
 pushFooterLinksToUI();
 void pushApiKeysToUI();
+void pushPriceCoinsToUI();
